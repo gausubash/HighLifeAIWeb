@@ -1,0 +1,42 @@
+# Model registry — replaceable interfaces, versioned outputs
+models_version: "v0-mock"
+
+structural:
+  name: structural_segmentation
+  version: "0.0.0-mock"
+  classes:
+    - wall
+    - door
+    - sliding_door
+    - window
+    - stair
+    - lift
+    - room
+    - balcony
+    - service_space
+
+spatial:
+  name: spatial_segmentation
+  version: "0.0.0-mock"
+  classes:
+    - common_corridor
+    - private_hall
+    - common_lobby
+    - room
+    - service_space
+
+entrance:
+  name: entrance_classifier
+  version: "0.0.0-mock"
+  classes:
+    - unit_entrance
+    - internal_room_door
+    - common_service_door
+    - fire_exit
+    - balcony_door
+    - unknown
+
+ocr:
+  name: tesseract
+  version: "0.0.0-mock"
+  engine: tesseract

@@ -1,0 +1,70 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Python
+.venv/
+.venv*/
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Next.js
+apps/web/.next/
+apps/web/out/
+apps/web/next-env.d.ts
+
+# Build
+*.tsbuildinfo
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Confidential / large data (never commit)
+data/
+*.pdf
+labelme*/
+annotations/
+models/*.pt
+models/*.pth
+models/*.onnx
+*.weights
+captions/
+outputs/
+output/
+masks/
+dataset/
+
+# Supabase local
+supabase/.branches/
+supabase/.temp/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Coverage
+coverage/
+htmlcov/
+.coverage
+
+# Docker volumes
+postgres-data/

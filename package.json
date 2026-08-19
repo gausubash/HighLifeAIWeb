@@ -1,0 +1,19 @@
+{
+  "name": "highlife-ai-web",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w @highlife/web",
+    "build": "npm run build -w @highlife/web",
+    "lint": "npm run lint -w @highlife/web",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test -w @highlife/web",
+    "test:inference": "cd services/inference && python -m pytest tests/ -v"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

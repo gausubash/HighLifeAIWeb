@@ -1,0 +1,42 @@
+# Building-level dataset configuration
+# Never randomly split tiles from the same building across train/test.
+
+dataset_version: "v1"
+annotation_format: "master_v1"
+
+buildings:
+  B20:
+    prefix: "20"
+    plan_count: 6
+  B21:
+    prefix: "21"
+    plan_count: 6
+  B82:
+    prefix: "82"
+    plan_count: 4
+  B98:
+    prefix: "98"
+    plan_count: 6
+  B118:
+    prefix: "118"
+    plan_count: 10
+
+# Leave-one-building-out cross-validation folds
+splits:
+  fold_1:
+    train: ["B21", "B82", "B98", "B118"]
+    test: ["B20"]
+  fold_2:
+    train: ["B20", "B82", "B98", "B118"]
+    test: ["B21"]
+  fold_3:
+    train: ["B20", "B21", "B98", "B118"]
+    test: ["B82"]
+  fold_4:
+    train: ["B20", "B21", "B82", "B118"]
+    test: ["B98"]
+  fold_5:
+    train: ["B20", "B21", "B82", "B98"]
+    test: ["B118"]
+
+default_fold: fold_1

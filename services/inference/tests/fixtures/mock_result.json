@@ -1,0 +1,107 @@
+{
+  "analysis_id": "mock-analysis",
+  "project_id": "mock-project",
+  "source_file_name": "mock_floor_plan.pdf",
+  "software_commit": "local-dev",
+  "model_versions": {
+    "structural": "0.0.0-mock",
+    "spatial": "0.0.0-mock",
+    "entrance": "0.0.0-mock",
+    "ocr": "0.0.0-mock"
+  },
+  "policy_version": "draft-v1",
+  "dataset_version": "v1",
+  "created_at": "2026-08-15T10:01:30+00:00",
+  "status": "review_required",
+  "current_stage": "review_required",
+  "pages": [
+    {
+      "id": "page-001",
+      "page_number": 1,
+      "image_path": "mock/page_0001.png",
+      "width_px": 1200,
+      "height_px": 800,
+      "is_floor_plan": true,
+      "scale_m_per_pixel": 0.01,
+      "scale_source": "declared_title_block",
+      "scale_confidence": 0.85
+    }
+  ],
+  "spaces": [
+    {
+      "id": "S001",
+      "external_id": "S001",
+      "space_type": "common_corridor",
+      "unit_id": null,
+      "geometry": [[400, 200], [800, 200], [800, 280], [400, 280]],
+      "area_m2": 32.0,
+      "confidence": 0.91,
+      "review_required": false,
+      "is_common": true
+    },
+    {
+      "id": "S004",
+      "external_id": "S004",
+      "space_type": "balcony",
+      "unit_id": "U01",
+      "geometry": [[100, 560], [380, 560], [380, 650], [100, 650]],
+      "area_m2": 9.4,
+      "confidence": 0.82,
+      "review_required": false,
+      "is_common": false
+    }
+  ],
+  "openings": [
+    {
+      "id": "O001",
+      "external_id": "O001",
+      "opening_type": "unit_entrance",
+      "geometry": [[390, 230], [410, 230], [410, 250], [390, 250]],
+      "from_space_id": "S001",
+      "to_space_id": "S002",
+      "confidence": 0.87
+    }
+  ],
+  "units": [
+    {
+      "id": "U01",
+      "external_id": "U01",
+      "geometry": [[100, 100], [380, 100], [380, 650], [100, 650]],
+      "area_m2": 79.9,
+      "entrance_ids": ["O001"],
+      "space_ids": ["S004"],
+      "confidence": 0.89,
+      "review_required": false
+    }
+  ],
+  "compliance_results": [
+    {
+      "id": "cr-001",
+      "analysis_id": "mock-analysis",
+      "unit_external_id": "U01",
+      "rule_code": "private_open_space_area",
+      "policy_version": "draft-v1",
+      "result": "pass",
+      "measured_value": 9.4,
+      "required_value": 8.0,
+      "unit": "m2",
+      "explanation": "Balcony area meets minimum private open space requirement.",
+      "evidence": {"unit_id": "U01", "space_ids": ["S004"]},
+      "confidence": 0.88,
+      "created_at": "2026-08-15T10:01:30+00:00"
+    }
+  ],
+  "unit_summaries": [
+    {
+      "unit_id": "U01",
+      "area_m2": 79.9,
+      "room_count": 2,
+      "bedroom_count": 1,
+      "bathroom_count": 1,
+      "private_open_space_area_m2": 9.4,
+      "confidence": 0.89,
+      "review_status": "ok"
+    }
+  ],
+  "review_warnings": []
+}

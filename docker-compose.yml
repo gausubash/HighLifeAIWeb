@@ -1,0 +1,19 @@
+# Optional local Supabase stack for Phase 3 development.
+# Requires: supabase CLI (https://supabase.com/docs/guides/cli)
+
+services:
+  # Placeholder — use `supabase start` for full local stack.
+  # This file documents intent; actual local dev uses Supabase CLI.
+  postgres:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    ports:
+      - "54322:5432"
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+volumes:
+  postgres-data:
