@@ -2,6 +2,7 @@ export * from "./analysis";
 export * from "./project";
 export * from "./geometry";
 export * from "./compliance";
+export * from "./scene-graph";
 
 import type { AnalysisStage, AnalysisStatus } from "./analysis";
 import type { ComplianceResult, ReviewWarning, UnitSummary } from "./compliance";

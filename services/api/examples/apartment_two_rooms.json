@@ -1,0 +1,345 @@
+{
+  "schemaVersion": "1.0.0",
+  "id": "6df52f85-6b15-44fd-9ff8-d93e9cc6bbcb",
+  "projectId": "11111111-1111-1111-1111-111111111111",
+  "planDocumentId": "22222222-2222-2222-2222-222222222222",
+  "pageId": "33333333-3333-3333-3333-333333333333",
+  "analysisRunId": "44444444-4444-4444-4444-444444444444",
+  "coordinateSystems": [
+    "original_image_px",
+    "working_image_px",
+    "world_mm"
+  ],
+  "workingToOriginal": {
+    "scaleX": 1.0,
+    "scaleY": 1.0,
+    "translateX": 0.0,
+    "translateY": 0.0
+  },
+  "calibration": {
+    "id": "3d982df4-e196-4018-bcff-184811cc0003",
+    "method": "manual_two_point",
+    "mmPerPixel": 5.0,
+    "confidence": 0.95,
+    "sourceText": "3000 mm wall dimension",
+    "sourceGeometryPx": [
+      {
+        "x": 80.0,
+        "y": 80.0
+      },
+      {
+        "x": 680.0,
+        "y": 80.0
+      }
+    ],
+    "verifiedByUser": true,
+    "active": true,
+    "createdAt": "2026-08-22T04:13:26.140621Z"
+  },
+  "entities": [
+    {
+      "id": "03a994e5-3437-49d5-87ff-95285eace3b5",
+      "type": "main_floorplan",
+      "bboxPx": {
+        "x": 40.0,
+        "y": 40.0,
+        "width": 860.0,
+        "height": 420.0
+      },
+      "polygonPx": [
+        {
+          "x": 40.0,
+          "y": 40.0
+        },
+        {
+          "x": 900.0,
+          "y": 40.0
+        },
+        {
+          "x": 900.0,
+          "y": 460.0
+        },
+        {
+          "x": 40.0,
+          "y": 460.0
+        }
+      ],
+      "polylinePx": null,
+      "attributes": {
+        "label": "Main plan"
+      },
+      "confidence": 1.0,
+      "status": "user_confirmed",
+      "evidence": [],
+      "createdAt": "2026-08-22T04:13:26.140621Z",
+      "updatedAt": "2026-08-22T04:13:26.140621Z"
+    },
+    {
+      "id": "0348d53c-a679-47ad-8839-60974d06ca9a",
+      "type": "wall",
+      "bboxPx": null,
+      "polygonPx": null,
+      "polylinePx": [
+        {
+          "x": 520.0,
+          "y": 80.0
+        },
+        {
+          "x": 520.0,
+          "y": 420.0
+        }
+      ],
+      "attributes": {
+        "orientation": "vertical",
+        "thicknessPx": 8
+      },
+      "confidence": 0.4,
+      "status": "predicted",
+      "evidence": [
+        {
+          "modelId": "mock_layout",
+          "modelVersion": "0.0.1",
+          "sourceArtifactId": "4b783745-fd98-4244-bb2c-fcb8740af8d9",
+          "confidence": 0.42,
+          "inferredAt": "2026-08-22T04:13:26.140621Z"
+        }
+      ],
+      "createdAt": "2026-08-22T04:13:26.140621Z",
+      "updatedAt": "2026-08-22T04:13:26.140621Z"
+    },
+    {
+      "id": "a16b56be-2b29-4563-aa79-11e414e91cf0",
+      "type": "door",
+      "bboxPx": {
+        "x": 500.0,
+        "y": 220.0,
+        "width": 40.0,
+        "height": 24.0
+      },
+      "polygonPx": null,
+      "polylinePx": [
+        {
+          "x": 520.0,
+          "y": 220.0
+        },
+        {
+          "x": 520.0,
+          "y": 244.0
+        }
+      ],
+      "attributes": {
+        "openingKind": "hinged_door",
+        "spanPx": 24
+      },
+      "confidence": 0.35,
+      "status": "predicted",
+      "evidence": [
+        {
+          "modelId": "mock_layout",
+          "modelVersion": "0.0.1",
+          "sourceArtifactId": "4b783745-fd98-4244-bb2c-fcb8740af8d9",
+          "confidence": 0.42,
+          "inferredAt": "2026-08-22T04:13:26.140621Z"
+        }
+      ],
+      "createdAt": "2026-08-22T04:13:26.140621Z",
+      "updatedAt": "2026-08-22T04:13:26.140621Z"
+    },
+    {
+      "id": "73666a97-0aea-4912-a618-5905953668ea",
+      "type": "room",
+      "bboxPx": {
+        "x": 80.0,
+        "y": 80.0,
+        "width": 440.0,
+        "height": 340.0
+      },
+      "polygonPx": [
+        {
+          "x": 80.0,
+          "y": 80.0
+        },
+        {
+          "x": 520.0,
+          "y": 80.0
+        },
+        {
+          "x": 520.0,
+          "y": 420.0
+        },
+        {
+          "x": 80.0,
+          "y": 420.0
+        }
+      ],
+      "polylinePx": null,
+      "attributes": {
+        "label": "Living",
+        "roomType": "living"
+      },
+      "confidence": 1.0,
+      "status": "user_edited",
+      "evidence": [],
+      "createdAt": "2026-08-22T04:13:26.140621Z",
+      "updatedAt": "2026-08-22T04:13:26.140621Z"
+    },
+    {
+      "id": "6a2d7cf6-5cb0-42a8-8828-9c4d84c2d557",
+      "type": "room",
+      "bboxPx": {
+        "x": 520.0,
+        "y": 80.0,
+        "width": 340.0,
+        "height": 340.0
+      },
+      "polygonPx": [
+        {
+          "x": 520.0,
+          "y": 80.0
+        },
+        {
+          "x": 860.0,
+          "y": 80.0
+        },
+        {
+          "x": 860.0,
+          "y": 420.0
+        },
+        {
+          "x": 520.0,
+          "y": 420.0
+        }
+      ],
+      "polylinePx": null,
+      "attributes": {
+        "label": "Bedroom",
+        "roomType": "bedroom"
+      },
+      "confidence": 1.0,
+      "status": "user_edited",
+      "evidence": [],
+      "createdAt": "2026-08-22T04:13:26.140621Z",
+      "updatedAt": "2026-08-22T04:13:26.140621Z"
+    }
+  ],
+  "relationships": [
+    {
+      "id": "cecca739-0a62-4466-a063-cd3433a8f824",
+      "type": "room_adjacency",
+      "fromEntityId": "73666a97-0aea-4912-a618-5905953668ea",
+      "toEntityId": "6a2d7cf6-5cb0-42a8-8828-9c4d84c2d557",
+      "confidence": 0.9,
+      "attributes": {
+        "via": "shared_wall",
+        "wallId": "0348d53c-a679-47ad-8839-60974d06ca9a"
+      }
+    },
+    {
+      "id": "e0a249a3-4722-45f4-a66a-177dac2b5171",
+      "type": "door_to_wall",
+      "fromEntityId": "a16b56be-2b29-4563-aa79-11e414e91cf0",
+      "toEntityId": "0348d53c-a679-47ad-8839-60974d06ca9a",
+      "confidence": 0.8,
+      "attributes": {}
+    },
+    {
+      "id": "7eb5854b-be73-444e-9b38-8aa88250ca62",
+      "type": "room_door_access",
+      "fromEntityId": "73666a97-0aea-4912-a618-5905953668ea",
+      "toEntityId": "6a2d7cf6-5cb0-42a8-8828-9c4d84c2d557",
+      "confidence": 0.7,
+      "attributes": {
+        "doorId": "a16b56be-2b29-4563-aa79-11e414e91cf0"
+      }
+    }
+  ],
+  "measurements": [
+    {
+      "id": "371a29be-e6a5-4bb5-abcc-8e30ba80ad15",
+      "kind": "room_area",
+      "sourceGeometryIds": [
+        "73666a97-0aea-4912-a618-5905953668ea"
+      ],
+      "calibrationId": "3d982df4-e196-4018-bcff-184811cc0003",
+      "valuePx": 149600.0,
+      "valueMm": null,
+      "valueM": null,
+      "valueM2": 3.74,
+      "unit": "m2",
+      "precision": 2,
+      "confidence": 0.9,
+      "formula": "shoelace(polygon) * (mm_per_pixel/1000)^2",
+      "estimated": false
+    },
+    {
+      "id": "87c4ab3c-7965-4b3a-b7af-5f4210bf357c",
+      "kind": "room_perimeter",
+      "sourceGeometryIds": [
+        "73666a97-0aea-4912-a618-5905953668ea"
+      ],
+      "calibrationId": "3d982df4-e196-4018-bcff-184811cc0003",
+      "valuePx": 1560.0,
+      "valueMm": 7800.0,
+      "valueM": 7.8,
+      "valueM2": null,
+      "unit": "m",
+      "precision": 2,
+      "confidence": 0.9,
+      "formula": null,
+      "estimated": false
+    },
+    {
+      "id": "8eb3661a-c60e-4059-a863-c6692b2e2bb7",
+      "kind": "opening_width",
+      "sourceGeometryIds": [
+        "a16b56be-2b29-4563-aa79-11e414e91cf0"
+      ],
+      "calibrationId": "3d982df4-e196-4018-bcff-184811cc0003",
+      "valuePx": 24.0,
+      "valueMm": 120.0,
+      "valueM": null,
+      "valueM2": null,
+      "unit": "mm",
+      "precision": 0,
+      "confidence": 0.35,
+      "formula": null,
+      "estimated": true
+    },
+    {
+      "id": "d834f05d-a921-4398-b47d-c74d164705fe",
+      "kind": "wall_thickness",
+      "sourceGeometryIds": [
+        "0348d53c-a679-47ad-8839-60974d06ca9a"
+      ],
+      "calibrationId": "3d982df4-e196-4018-bcff-184811cc0003",
+      "valuePx": 8.0,
+      "valueMm": 40.0,
+      "valueM": null,
+      "valueM2": null,
+      "unit": "mm",
+      "precision": 0,
+      "confidence": 0.4,
+      "formula": null,
+      "estimated": true
+    },
+    {
+      "id": "e803aa14-75bb-4b1b-9955-d6d5c96dd1de",
+      "kind": "min_room_width",
+      "sourceGeometryIds": [
+        "6a2d7cf6-5cb0-42a8-8828-9c4d84c2d557"
+      ],
+      "calibrationId": "3d982df4-e196-4018-bcff-184811cc0003",
+      "valuePx": null,
+      "valueMm": 1700.0,
+      "valueM": null,
+      "valueM2": null,
+      "unit": "mm",
+      "precision": 0,
+      "confidence": 0.9,
+      "formula": null,
+      "estimated": false
+    }
+  ],
+  "createdAt": "2026-08-22T04:13:26.140621Z",
+  "updatedAt": "2026-08-22T04:13:26.140621Z"
+}

@@ -1,19 +1,16 @@
 # Model registry — replaceable interfaces, versioned outputs
-models_version: "v0-mock"
+models_version: "v0-yolo11-layout"
 
 structural:
-  name: structural_segmentation
-  version: "0.0.0-mock"
+  name: yolo11x-blueprint-layout-detector
+  version: "yolo_layout"
+  architecture: yolo11x-detect
+  source: https://huggingface.co/GreenMap/yolo11x-blueprint-layout-detector
+  weights: https://huggingface.co/GreenMap/yolo11x-blueprint-layout-detector/resolve/main/yolo_layout.pt
   classes:
-    - wall
-    - door
-    - sliding_door
-    - window
-    - stair
-    - lift
-    - room
-    - balcony
-    - service_space
+    - drawing_area
+    - legend_block
+    - title_block
 
 spatial:
   name: spatial_segmentation

@@ -4,25 +4,40 @@ Production-oriented platform for analysing residential floor-plan PDFs: detect s
 
 Fresh monorepo built from scratch. Prior research prototypes live in the separate [`highlife`](https://github.com/gausubash/highlife) repository — useful as reference, not as runtime dependency.
 
+**Frontend vs backend:** see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+
 ## Architecture
 
 ```
-Browser (Next.js)  →  Supabase (Auth, DB, Storage)  ←  GPU worker (Python, polling)
-                              ↓
-                     Queued analysis jobs
+Laptop (no GPU)                         RACE = private GPU virtual station
+apps/web  ──HTTPS──►  AWS data plane  ◄── worker (outbound poll)
+                      (Supabase DB + Storage)
+                            ▲
+                            └── training on RACE writes weights to Storage
 ```
 
-- **Laptop:** frontend development, mock/CPU pipeline, tests
-- **GPU VM (RMIT RACE/AWS):** training and CUDA inference only — not required for normal dev
+RACE is an RMIT-dedicated AWS **workstation with GPU**, not a public API. The browser never calls RACE directly; both machines sync through shared storage and the job queue.
+
+| Layer | Path | Machine |
+|-------|------|---------|
+| Frontend | `apps/web` | This PC (no GPU) |
+| Floor-plan API | `services/api` | This PC — projects, uploads, scene graph (no CV yet) |
+| Inference worker / API | `services/inference` | Local mock **or** RACE (worker) |
+| Training | `services/training` | RACE GPU station only |
+| Types | `packages/shared-types` | Shared contracts including `FloorPlanSceneGraph` |
 
 ## Repository layout
 
 ```
-apps/web/              Next.js frontend
-services/inference/    Python pipeline + GPU worker
+apps/web/              Next.js frontend (UI only — no models)
+services/api/          FastAPI floor-plan intelligence (local SQLite + files)
+services/inference/    FastAPI inference + pipeline + GPU worker
+services/training/     Training jobs (RACE GPU; placeholder)
 packages/shared-types/ Cross-package TypeScript types
 configs/               Dataset splits, model registry
 scripts/               Annotation utilities
+docs/ARCHITECTURE.md   FE / BE / RACE AWS topology
+docs/FOUNDATION.md     Extraction foundation (scene graph)
 supabase/migrations/   Database schema (Phase 3)
 tests/                 Integration tests
 ```
@@ -30,27 +45,30 @@ tests/                 Integration tests
 ## Quick start (local, no GPU)
 
 ```bash
-# Install Node dependencies
+# Frontend
 npm install
-
-# Start frontend (mock mode — no Supabase required)
 npm run dev
 # → http://localhost:3000
 
-# Python inference service
-cd services/inference
+# Floor-plan intelligence API (local SQLite — mock scene graph, no CV)
+cd services/api
 python -m venv .venv
-# Windows:
 .venv\Scripts\activate
-# macOS/Linux:
-# source .venv/bin/activate
-
 pip install -r requirements.txt
 pytest tests/ -v
-python -m app.predict --mode mock --device cpu
+uvicorn app.main:app --reload --host 127.0.0.1 --port 8001
+# → http://127.0.0.1:8001/health
+# → http://127.0.0.1:8001/docs
+
+# Optional: Inference API mock (GPU/RACE contract — separate service)
+cd services/inference
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+uvicorn app.api:app --reload --port 8000
 ```
 
-Copy `.env.example` to `.env` and `services/inference/.env.example` to `services/inference/.env` when connecting Supabase (Phase 3).
+Copy `.env.example` to `.env`. Set `NEXT_PUBLIC_FLOOR_PLAN_API_URL=http://127.0.0.1:8001` when wiring the extraction API. Existing scale calibration in the Next.js viewer does not require this service.
 
 ## Run modes
 
@@ -58,7 +76,7 @@ Copy `.env.example` to `.env` and `services/inference/.env.example` to `services
 |--------|------------|----------|-----------------------------|
 | Mock   | `mock`     | `cpu`    | Local dev, CI, UI testing   |
 | CPU    | `real`     | `cpu`    | Real models on laptop       |
-| CUDA   | `real`     | `cuda`   | GPU VM inference/training   |
+| CUDA   | `real`     | `cuda`   | RACE AWS GPU inference/train|
 
 ## Development phases
 
@@ -69,7 +87,7 @@ Copy `.env.example` to `.env` and `services/inference/.env.example` to `services
 | 3     | 🔲      | Supabase auth, projects, storage, RLS    |
 | 4     | 🔲      | Master annotations, validation, splits   |
 | 5     | 🔲      | CPU geometry pipeline                    |
-| 6     | 🔲      | GPU worker, training                     |
+| 6     | 🔲      | RACE GPU worker + training (job queue via data plane) |
 | 7     | 🔲      | Review UI, exports, reports              |
 | 8     | 🔲      | Policy engine (versioned YAML)           |
 | 9     | 🔲      | Scalability (retries, heartbeat, batch)  |
@@ -77,8 +95,8 @@ Copy `.env.example` to `.env` and `services/inference/.env.example` to `services
 ## Security
 
 - Never commit PDFs, LabelMe annotations, credentials, or model weights
-- Service-role key is server/worker only — never in browser code
-- GPU VM is not publicly exposed in v1
+- Service-role key is worker/station only — never in browser code
+- RACE is a private GPU station — do not expose an inbound Inference API to the public internet
 
 ## Disclaimer
 

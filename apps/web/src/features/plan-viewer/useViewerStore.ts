@@ -2,6 +2,7 @@
 
 import { create } from "zustand";
 import type { ViewerLayer } from "@highlife/shared-types";
+import { clampZoom } from "./viewBounds";
 
 interface ViewerState {
   zoom: number;
@@ -37,7 +38,7 @@ export const useViewerStore = create<ViewerState>((set) => ({
   panY: 0,
   selectedId: null,
   visibleLayers: { ...DEFAULT_LAYERS },
-  setZoom: (zoom) => set({ zoom: Math.min(5, Math.max(0.2, zoom)) }),
+  setZoom: (zoom) => set({ zoom: clampZoom(zoom) }),
   setPan: (panX, panY) => set({ panX, panY }),
   resetView: () => set({ zoom: 1, panX: 0, panY: 0 }),
   selectObject: (selectedId) => set({ selectedId }),

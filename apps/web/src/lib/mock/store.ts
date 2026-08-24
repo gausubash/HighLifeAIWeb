@@ -1,118 +1,169 @@
+"use client";
+
 import type {
   Analysis,
   AnalysisResult,
   Project,
+  UpdateProjectInput,
 } from "@highlife/shared-types";
-import { mockAnalysisResult } from "./result";
+import type { ScaleInfo } from "@/lib/scale/parseScale";
+import { deleteAnalysisPageImages } from "@/lib/pdf/pageImageStore";
 
-const MOCK_OWNER = "mock-user-001";
+const STORAGE_KEY = "highlife-project-store";
+const LOCAL_OWNER = "local-user";
 
-export const MOCK_PROJECTS: Project[] = [
-  {
-    id: "proj-001",
-    ownerId: MOCK_OWNER,
-    name: "Sunset Apartments — Tower A",
-    description: "Multi-unit residential review, levels 1–3",
-    jurisdiction: "victoria",
-    policyVersion: "draft-v1",
-    createdAt: "2026-08-01T09:00:00.000Z",
-    updatedAt: "2026-08-15T14:30:00.000Z",
-  },
-  {
-    id: "proj-002",
-    ownerId: MOCK_OWNER,
-    name: "Harbour View — Block B",
-    description: "Two-bedroom mix assessment",
-    jurisdiction: "victoria",
-    policyVersion: "draft-v1",
-    createdAt: "2026-08-10T11:00:00.000Z",
-    updatedAt: "2026-08-10T11:00:00.000Z",
-  },
-];
+interface PersistedState {
+  projects: Project[];
+  analyses: Analysis[];
+  results: Record<string, AnalysisResult>;
+  scaleInfos: Record<string, ScaleInfo>;
+}
 
-export const MOCK_ANALYSES: Analysis[] = [
-  {
-    id: "analysis-001",
-    projectId: "proj-001",
-    ownerId: MOCK_OWNER,
-    sourceFileName: "tower_a_level_2.pdf",
-    status: "review_required",
-    progress: 100,
-    currentStage: "review_required",
-    pageCount: 1,
-    unitCount: 2,
-    reviewCount: 1,
-    modelVersions: { structural: "0.0.0-mock", spatial: "0.0.0-mock" },
-    softwareCommit: "mock-local",
-    createdAt: "2026-08-15T10:00:00.000Z",
-    startedAt: "2026-08-15T10:00:05.000Z",
-    completedAt: "2026-08-15T10:01:30.000Z",
-  },
-  {
-    id: "analysis-002",
-    projectId: "proj-001",
-    ownerId: MOCK_OWNER,
-    sourceFileName: "tower_a_level_1.pdf",
-    status: "completed",
-    progress: 100,
-    currentStage: "completed",
-    pageCount: 1,
-    unitCount: 2,
-    reviewCount: 0,
-    createdAt: "2026-08-01T09:30:00.000Z",
-    completedAt: "2026-08-01T09:32:00.000Z",
-  },
-];
+function loadState(): PersistedState {
+  if (typeof window === "undefined") {
+    return { projects: [], analyses: [], results: {}, scaleInfos: {} };
+  }
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (!raw) return { projects: [], analyses: [], results: {}, scaleInfos: {} };
+    const parsed = JSON.parse(raw) as PersistedState;
+    return {
+      projects: parsed.projects ?? [],
+      analyses: parsed.analyses ?? [],
+      results: parsed.results ?? {},
+      scaleInfos: parsed.scaleInfos ?? {},
+    };
+  } catch {
+    return { projects: [], analyses: [], results: {}, scaleInfos: {} };
+  }
+}
 
-/** In-memory store for mock mode (Phase 2). Replaced by Supabase in Phase 3. */
-class MockStore {
-  private projects: Project[] = [...MOCK_PROJECTS];
-  private analyses: Analysis[] = [...MOCK_ANALYSES];
-  private results: Map<string, AnalysisResult> = new Map([
-    ["analysis-001", mockAnalysisResult],
-    ["analysis-002", { ...mockAnalysisResult, analysisId: "analysis-002", status: "completed", currentStage: "completed" }],
-  ]);
+class ProjectStore {
+  private projects: Project[] = [];
+  private analyses: Analysis[] = [];
+  private results: Map<string, AnalysisResult> = new Map();
+  private scaleInfos: Map<string, ScaleInfo> = new Map();
+  private listeners = new Set<() => void>();
+  private hydrated = false;
+
+  private hydrate(): void {
+    if (this.hydrated || typeof window === "undefined") return;
+    const state = loadState();
+    this.projects = state.projects;
+    this.analyses = state.analyses;
+    this.results = new Map(Object.entries(state.results));
+    this.scaleInfos = new Map(Object.entries(state.scaleInfos));
+    this.hydrated = true;
+  }
+
+  private persist(): void {
+    if (typeof window === "undefined") return;
+    const payload: PersistedState = {
+      projects: this.projects,
+      analyses: this.analyses,
+      results: Object.fromEntries(this.results),
+      scaleInfos: Object.fromEntries(this.scaleInfos),
+    };
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+  }
+
+  subscribe(listener: () => void): () => void {
+    this.hydrate();
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+
+  private emit(): void {
+    this.persist();
+    for (const listener of this.listeners) {
+      listener();
+    }
+  }
 
   listProjects(): Project[] {
-    return [...this.projects];
+    this.hydrate();
+    return [...this.projects].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   }
 
   getProject(id: string): Project | undefined {
+    this.hydrate();
     return this.projects.find((p) => p.id === id);
   }
 
   createProject(input: Omit<Project, "id" | "ownerId" | "createdAt" | "updatedAt">): Project {
+    this.hydrate();
     const now = new Date().toISOString();
     const project: Project = {
       id: `proj-${Date.now()}`,
-      ownerId: MOCK_OWNER,
+      ownerId: LOCAL_OWNER,
       createdAt: now,
       updatedAt: now,
       ...input,
     };
     this.projects.unshift(project);
+    this.emit();
     return project;
   }
 
+  updateProject(id: string, input: UpdateProjectInput): Project | undefined {
+    this.hydrate();
+    const index = this.projects.findIndex((p) => p.id === id);
+    if (index === -1) return undefined;
+
+    const current = this.projects[index];
+    const updated: Project = {
+      ...current,
+      ...input,
+      updatedAt: new Date().toISOString(),
+    };
+    this.projects[index] = updated;
+    this.emit();
+    return updated;
+  }
+
+  deleteProject(id: string): boolean {
+    this.hydrate();
+    const before = this.projects.length;
+    this.projects = this.projects.filter((p) => p.id !== id);
+    if (this.projects.length === before) return false;
+
+    const analysisIds = this.analyses.filter((a) => a.projectId === id).map((a) => a.id);
+    this.analyses = this.analyses.filter((a) => a.projectId !== id);
+    for (const analysisId of analysisIds) {
+      this.results.delete(analysisId);
+      this.scaleInfos.delete(analysisId);
+    }
+
+    this.emit();
+    void Promise.all(analysisIds.map((aid) => deleteAnalysisPageImages(aid)));
+    return true;
+  }
+
   listAnalyses(projectId: string): Analysis[] {
+    this.hydrate();
     return this.analyses
       .filter((a) => a.projectId === projectId)
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
 
   getAnalysis(id: string): Analysis | undefined {
+    this.hydrate();
     return this.analyses.find((a) => a.id === id);
   }
 
   getResult(analysisId: string): AnalysisResult | undefined {
+    this.hydrate();
     return this.results.get(analysisId);
   }
 
   createAnalysis(projectId: string, fileName: string): Analysis {
+    this.hydrate();
     const analysis: Analysis = {
       id: `analysis-${Date.now()}`,
       projectId,
-      ownerId: MOCK_OWNER,
+      ownerId: LOCAL_OWNER,
       sourceFileName: fileName,
       status: "queued",
       progress: 0,
@@ -120,19 +171,57 @@ class MockStore {
       createdAt: new Date().toISOString(),
     };
     this.analyses.unshift(analysis);
+
+    const projectIndex = this.projects.findIndex((p) => p.id === projectId);
+    if (projectIndex !== -1) {
+      this.projects[projectIndex] = {
+        ...this.projects[projectIndex],
+        updatedAt: new Date().toISOString(),
+      };
+    }
+
+    this.emit();
     return analysis;
   }
 
   updateAnalysis(id: string, patch: Partial<Analysis>): Analysis | undefined {
+    this.hydrate();
     const index = this.analyses.findIndex((a) => a.id === id);
     if (index === -1) return undefined;
     this.analyses[index] = { ...this.analyses[index], ...patch };
+    this.emit();
     return this.analyses[index];
   }
 
+  deleteAnalysis(id: string): boolean {
+    this.hydrate();
+    const before = this.analyses.length;
+    this.analyses = this.analyses.filter((a) => a.id !== id);
+    if (this.analyses.length === before) return false;
+    this.results.delete(id);
+    this.scaleInfos.delete(id);
+    this.emit();
+    // Fire-and-forget: page rasters live in IndexedDB
+    void deleteAnalysisPageImages(id);
+    return true;
+  }
+
   setResult(analysisId: string, result: AnalysisResult): void {
+    this.hydrate();
     this.results.set(analysisId, result);
+    this.emit();
+  }
+
+  setScaleInfo(analysisId: string, info: ScaleInfo): void {
+    this.hydrate();
+    this.scaleInfos.set(analysisId, info);
+    this.emit();
+  }
+
+  getScaleInfo(analysisId: string): ScaleInfo | undefined {
+    this.hydrate();
+    return this.scaleInfos.get(analysisId);
   }
 }
 
-export const mockStore = new MockStore();
+export const projectStore = new ProjectStore();

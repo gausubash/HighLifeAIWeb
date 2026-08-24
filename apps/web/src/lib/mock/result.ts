@@ -24,7 +24,16 @@ export const mockAnalysisResult: AnalysisResult = {
     {
       id: "page-001",
       pageNumber: 1,
-      imagePath: "/mock/floor-plan.svg",
+      imagePath: (() => {
+        const svg = `
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800" viewBox="0 0 1200 800">
+  <rect width="1200" height="800" fill="#ffffff" />
+  <rect x="40" y="40" width="1120" height="720" fill="#f8fafc" stroke="#e2e8f0" />
+  <text x="60" y="90" font-family="Arial, sans-serif" font-size="28" fill="#64748b">Mock plan background</text>
+  <text x="60" y="130" font-family="Arial, sans-serif" font-size="18" fill="#94a3b8">Upload a PDF to see real page + overlays</text>
+</svg>`;
+        return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg.trim())}`;
+      })(),
       widthPx: 1200,
       heightPx: 800,
       isFloorPlan: true,

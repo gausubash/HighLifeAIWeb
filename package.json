@@ -11,7 +11,8 @@
     "lint": "npm run lint -w @highlife/web",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test -w @highlife/web",
-    "test:inference": "cd services/inference && python -m pytest tests/ -v"
+    "test:inference": "cd services/inference && python -m pytest tests/ -v",
+    "test:api": "cd services/api && python -m pytest tests/ -v"
   },
   "engines": {
     "node": ">=20"

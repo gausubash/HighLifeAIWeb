@@ -7,10 +7,16 @@ import pytest
 from app.config import Device, RunMode, Settings, get_settings
 
 
-def test_default_settings_mock_mode():
+def test_default_settings_mock_mode(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.delenv("YOLO_WEIGHTS", raising=False)
     settings = Settings(_env_file=None)
     assert settings.run_mode == RunMode.MOCK
     assert settings.device == Device.CPU
+    assert settings.yolo_weights == ""
+    assert settings.use_layout_detector is False
+    assert settings.use_room_detector is False
+    assert settings.yolo_room_weights == ""
+    assert settings.yolo_imgsz == 1280
 
 
 def test_settings_from_env(monkeypatch: pytest.MonkeyPatch):

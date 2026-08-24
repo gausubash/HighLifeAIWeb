@@ -44,6 +44,9 @@ export interface PlanPage {
   scaleMPerPixel?: number;
   scaleSource?: string;
   scaleConfidence?: number;
+  /** How the source page was drawn: vector CAD, scanned raster, or mixed. */
+  graphicsKind?: "vector" | "raster" | "hybrid" | "image" | "unknown";
+  graphicsSummary?: string;
 }
 
 /** Layer identifiers for the plan viewer */

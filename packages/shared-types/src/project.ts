@@ -15,3 +15,10 @@ export interface CreateProjectInput {
   jurisdiction: string;
   policyVersion: string;
 }
+
+export interface UpdateProjectInput {
+  name?: string;
+  description?: string;
+  jurisdiction?: string;
+  policyVersion?: string;
+}

@@ -40,12 +40,15 @@ Thumbs.db
 
 # Confidential / large data (never commit)
 data/
+storage/
 *.pdf
 labelme*/
 annotations/
 models/*.pt
 models/*.pth
 models/*.onnx
+*.pt
+*.pth
 *.weights
 captions/
 outputs/
@@ -60,6 +63,9 @@ supabase/.temp/
 # Logs
 *.log
 npm-debug.log*
+
+# Ultralytics / training runs
+runs/
 
 # Coverage
 coverage/

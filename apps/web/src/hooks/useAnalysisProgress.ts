@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import type { Analysis } from "@highlife/shared-types";
-import { mockStore } from "@/lib/mock/store";
+import { projectStore } from "@/lib/mock/store";
 import { mockAnalysisResult } from "@/lib/mock/result";
 import { nextStage, stageProgress } from "@/lib/mock/stages";
 
@@ -22,11 +22,11 @@ export function useAnalysisProgress({
   enabled = true,
 }: UseAnalysisProgressOptions) {
   const [analysis, setAnalysis] = useState<Analysis | undefined>(() =>
-    mockStore.getAnalysis(analysisId)
+    projectStore.getAnalysis(analysisId)
   );
 
   const refresh = useCallback(() => {
-    setAnalysis(mockStore.getAnalysis(analysisId));
+    setAnalysis(projectStore.getAnalysis(analysisId));
   }, [analysisId]);
 
   useEffect(() => {
@@ -41,7 +41,7 @@ export function useAnalysisProgress({
     }
 
     if (analysis.status === "queued") {
-      mockStore.updateAnalysis(analysisId, {
+      projectStore.updateAnalysis(analysisId, {
         status: "processing",
         currentStage: "rendering_pdf",
         progress: stageProgress("rendering_pdf"),
@@ -52,30 +52,40 @@ export function useAnalysisProgress({
     }
 
     const timer = window.setInterval(() => {
-      const current = mockStore.getAnalysis(analysisId);
+      const current = projectStore.getAnalysis(analysisId);
       if (!current || current.status !== "processing") return;
 
       const upcoming = nextStage(current.currentStage);
       if (upcoming === "review_required") {
-        mockStore.updateAnalysis(analysisId, {
+        const existingResult = projectStore.getResult(analysisId);
+        const unitCount = existingResult?.units.length ?? mockAnalysisResult.units.length;
+        const reviewCount =
+          existingResult?.reviewWarnings.length ?? mockAnalysisResult.reviewWarnings.length;
+
+        projectStore.updateAnalysis(analysisId, {
           status: "review_required",
           currentStage: "review_required",
           progress: 100,
           pageCount: 1,
-          unitCount: mockAnalysisResult.units.length,
-          reviewCount: mockAnalysisResult.reviewWarnings.length,
+          unitCount,
+          reviewCount,
           completedAt: new Date().toISOString(),
         });
-        mockStore.setResult(analysisId, {
-          ...mockAnalysisResult,
-          analysisId,
-        });
+
+        // If the upload step already created a result (e.g. with a rendered PDF page image),
+        // don't overwrite it. Phase 2 can set the result early during upload.
+        if (!existingResult) {
+          projectStore.setResult(analysisId, {
+            ...mockAnalysisResult,
+            analysisId,
+          });
+        }
         refresh();
         window.clearInterval(timer);
         return;
       }
 
-      mockStore.updateAnalysis(analysisId, {
+      projectStore.updateAnalysis(analysisId, {
         currentStage: upcoming,
         progress: stageProgress(upcoming),
       });

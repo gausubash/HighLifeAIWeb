@@ -1,13 +1,22 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
+import { DM_Sans, Fraunces } from "next/font/google";
+import { AuthProvider } from "@/lib/auth/AuthProvider";
 import "./globals.css";
-import { AppHeader } from "@/components/AppHeader";
 
-const inter = Inter({ subsets: ["latin"] });
+const dmSans = DM_Sans({
+  subsets: ["latin"],
+  variable: "--font-sans",
+});
+
+const fraunces = Fraunces({
+  subsets: ["latin"],
+  variable: "--font-display",
+});
 
 export const metadata: Metadata = {
-  title: "HighLife — Floor Plan Analysis",
-  description: "Urban residential floor-plan analysis and compliance review platform",
+  title: "HighLife — Faster Approvals. More Homes.",
+  description:
+    "HighLife automates building design policy approval with computer vision and AI—so compliant homes move from drawing board to construction in days, not months.",
 };
 
 export default function RootLayout({
@@ -16,12 +25,9 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
-      <body className={inter.className}>
-        <div className="min-h-screen">
-          <AppHeader />
-          <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">{children}</main>
-        </div>
+    <html lang="en" className={`${dmSans.variable} ${fraunces.variable}`}>
+      <body className="font-sans antialiased">
+        <AuthProvider>{children}</AuthProvider>
       </body>
     </html>
   );

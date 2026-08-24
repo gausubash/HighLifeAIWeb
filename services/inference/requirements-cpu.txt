@@ -1,0 +1,5 @@
+# CPU extras for YOLO-seg (laptop). Torch CPU wheel is pulled by ultralytics.
+-r requirements.txt
+ultralytics>=8.3.0
+opencv-python-headless>=4.10.0
+segmentation-models-pytorch>=0.5.0

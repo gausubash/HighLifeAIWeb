@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { validatePdfUpload } from "@/features/uploads/useMockUpload";
+import { validatePdfUpload } from "@/features/uploads/usePdfUpload";
 
 function makeFile(name: string, type: string, size: number): File {
   const buffer = new ArrayBuffer(size);
@@ -14,11 +14,17 @@ describe("validatePdfUpload", () => {
     if (result.ok) expect(result.file.name).toBe("plan.pdf");
   });
 
-  it("rejects non-PDF files", () => {
-    const file = makeFile("plan.png", "image/png", 1024);
+  it("rejects unsupported files", () => {
+    const file = makeFile("notes.txt", "text/plain", 1024);
     const result = validatePdfUpload(file);
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toContain("PDF");
+  });
+
+  it("accepts PNG images", () => {
+    const file = makeFile("plan.png", "image/png", 1024);
+    const result = validatePdfUpload(file);
+    expect(result.ok).toBe(true);
   });
 
   it("rejects files over 50 MB", () => {

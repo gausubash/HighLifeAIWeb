@@ -71,8 +71,8 @@ export function PlanViewer({ result }: PlanViewerProps) {
   }
 
   return (
-    <div className="flex flex-col gap-3">
-      <div className="flex flex-wrap gap-2">
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-slate-200 bg-white px-3 py-2">
         <button type="button" className="btn-secondary text-xs" onClick={() => setZoom(zoom + 0.2)}>
           Zoom in
         </button>
@@ -80,15 +80,15 @@ export function PlanViewer({ result }: PlanViewerProps) {
           Zoom out
         </button>
         <button type="button" className="btn-secondary text-xs" onClick={resetView}>
-          Fit to screen
+          Fit
         </button>
-        <span className="self-center text-xs text-slate-500">
+        <span className="text-xs text-slate-500">
           {Math.round(zoom * 100)}% · drag to pan
         </span>
       </div>
 
       <div
-        className="overflow-hidden rounded-lg border border-slate-200 bg-white"
+        className="relative min-h-0 flex-1 overflow-hidden bg-slate-200"
         onWheel={handleWheel}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
@@ -96,123 +96,168 @@ export function PlanViewer({ result }: PlanViewerProps) {
         onMouseLeave={handleMouseUp}
         style={{ cursor: dragging.current ? "grabbing" : "grab" }}
       >
-        <svg
-          ref={svgRef}
-          viewBox={`0 0 ${page.widthPx} ${page.heightPx}`}
-          width="100%"
-          height="480"
-          role="img"
-          aria-label="Floor plan viewer"
-          style={{
-            transform: `translate(${panX}px, ${panY}px) scale(${zoom})`,
-            transformOrigin: "center center",
-          }}
-        >
-          {/* Background grid */}
-          <rect width={page.widthPx} height={page.heightPx} fill="#fafafa" />
-          <defs>
-            <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
-              <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#e2e8f0" strokeWidth="0.5" />
-            </pattern>
-          </defs>
-          <rect width={page.widthPx} height={page.heightPx} fill="url(#grid)" />
+        <div className="absolute inset-0 flex items-center justify-center">
+          <div
+            style={{
+              width: `${page.widthPx}px`,
+              height: `${page.heightPx}px`,
+              maxWidth: "100%",
+              maxHeight: "100%",
+              transform: `translate(${panX}px, ${panY}px) scale(${zoom})`,
+              transformOrigin: "center center",
+              position: "relative",
+            }}
+          >
+            {/* Base page image (uploaded PDF raster) */}
+            <img
+              src={page.imagePath}
+              alt="Floor plan page"
+              className="pointer-events-none absolute inset-0 h-full w-full object-fill"
+              draggable={false}
+            />
 
-          {/* Unit boundaries */}
-          {visibleLayers.unitBoundaries &&
-            result.units.map((unit) => (
-              <polygon
-                key={unit.id}
-                points={polygonToPoints(unit.geometry)}
-                fill="none"
-                stroke={confidenceColor(unit.confidence, unit.reviewRequired)}
-                strokeWidth={selectedId === unit.id ? 4 : 2}
-                strokeDasharray={unit.reviewRequired ? "8 4" : undefined}
-                onClick={() => selectObject(unit.id)}
-                style={{ cursor: "pointer" }}
-              />
-            ))}
+            {/* Overlay SVG */}
+            <svg
+              ref={svgRef}
+              viewBox={`0 0 ${page.widthPx} ${page.heightPx}`}
+              width="100%"
+              height="100%"
+              role="img"
+              aria-label="Floor plan viewer"
+              style={{
+                position: "absolute",
+                inset: 0,
+              }}
+            >
+              {/* Background grid */}
+              <defs>
+                <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+                  <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#e2e8f0" strokeWidth="0.5" />
+                </pattern>
+              </defs>
+              <rect width={page.widthPx} height={page.heightPx} fill="url(#grid)" opacity={0.35} />
 
-          {/* Spaces */}
-          {visibleLayers.rooms &&
-            result.spaces
-              .filter((s) => s.spaceType === "room")
-              .map((space) => (
-                <polygon
-                  key={space.id}
-                  points={polygonToPoints(space.geometry)}
-                  fill={SPACE_COLORS.room}
-                  fillOpacity={0.6}
-                  stroke={confidenceColor(space.confidence, space.reviewRequired)}
-                  strokeWidth={selectedId === space.id ? 3 : 1}
-                  onClick={() => selectObject(space.id)}
-                  style={{ cursor: "pointer" }}
-                />
-              ))}
+              {/* Unit boundaries */}
+              {visibleLayers.unitBoundaries &&
+                result.units.map((unit) => (
+                  <polygon
+                    key={unit.id}
+                    points={polygonToPoints(unit.geometry)}
+                    fill="none"
+                    stroke={confidenceColor(unit.confidence, unit.reviewRequired)}
+                    strokeWidth={selectedId === unit.id ? 4 : 2}
+                    strokeDasharray={unit.reviewRequired ? "8 4" : undefined}
+                    onClick={() => selectObject(unit.id)}
+                    style={{ cursor: "pointer" }}
+                  />
+                ))}
 
-          {visibleLayers.commonCorridor &&
-            result.spaces
-              .filter((s) => s.spaceType === "common_corridor")
-              .map((space) => (
-                <polygon
-                  key={space.id}
-                  points={polygonToPoints(space.geometry)}
-                  fill={SPACE_COLORS.common_corridor}
-                  fillOpacity={0.7}
-                  stroke="#3b82f6"
-                  strokeWidth={1}
-                />
-              ))}
+              {/* Spaces */}
+              {visibleLayers.rooms &&
+                result.spaces
+                  .filter((s) => s.spaceType === "room")
+                  .map((space) => (
+                    <polygon
+                      key={space.id}
+                      points={polygonToPoints(space.geometry)}
+                      fill={SPACE_COLORS.room}
+                      fillOpacity={0.6}
+                      stroke={confidenceColor(space.confidence, space.reviewRequired)}
+                      strokeWidth={selectedId === space.id ? 3 : 1}
+                      onClick={() => selectObject(space.id)}
+                      style={{ cursor: "pointer" }}
+                    />
+                  ))}
 
-          {visibleLayers.balconies &&
-            result.spaces
-              .filter((s) => s.spaceType === "balcony")
-              .map((space) => (
-                <polygon
-                  key={space.id}
-                  points={polygonToPoints(space.geometry)}
-                  fill={SPACE_COLORS.balcony}
-                  fillOpacity={0.7}
-                  stroke="#10b981"
-                  strokeWidth={1}
-                  onClick={() => selectObject(space.id)}
-                  style={{ cursor: "pointer" }}
-                />
-              ))}
+              {visibleLayers.privateHalls &&
+                result.spaces
+                  .filter((s) => s.spaceType === "private_hall")
+                  .map((space) => (
+                    <polygon
+                      key={space.id}
+                      points={polygonToPoints(space.geometry)}
+                      fill={SPACE_COLORS.private_hall}
+                      fillOpacity={0.5}
+                      stroke={confidenceColor(space.confidence, space.reviewRequired)}
+                      strokeWidth={selectedId === space.id ? 3 : 1}
+                      onClick={() => selectObject(space.id)}
+                      style={{ cursor: "pointer" }}
+                    />
+                  ))}
 
-          {/* Openings / entrances */}
-          {visibleLayers.unitEntrances &&
-            result.openings
-              .filter((o) => o.openingType === "unit_entrance")
-              .map((opening) => (
-                <polygon
-                  key={opening.id}
-                  points={polygonToPoints(opening.geometry)}
-                  fill="#dc2626"
-                  fillOpacity={0.8}
-                  stroke="#991b1b"
-                  strokeWidth={1}
-                />
-              ))}
+              {visibleLayers.commonCorridor &&
+                result.spaces
+                  .filter((s) => s.spaceType === "common_corridor")
+                  .map((space) => (
+                    <polygon
+                      key={space.id}
+                      points={polygonToPoints(space.geometry)}
+                      fill={SPACE_COLORS.common_corridor}
+                      fillOpacity={0.7}
+                      stroke="#3b82f6"
+                      strokeWidth={1}
+                    />
+                  ))}
 
-          {/* Labels for selected object */}
-          {selectedId && (() => {
-            const space = result.spaces.find((s) => s.id === selectedId);
-            const unit = result.units.find((u) => u.id === selectedId);
-            const obj = space ?? unit;
-            if (!obj) return null;
-            const cx = obj.geometry.reduce((s, p) => s + p[0], 0) / obj.geometry.length;
-            const cy = obj.geometry.reduce((s, p) => s + p[1], 0) / obj.geometry.length;
-            const area = "areaM2" in obj ? obj.areaM2 : undefined;
-            return (
-              <text x={cx} y={cy} textAnchor="middle" fontSize="14" fill="#1e293b" fontWeight="bold">
-                {selectedId}
-                {area != null && ` · ${formatArea(area)}`}
-                {" · "}
-                {formatConfidence(obj.confidence)}
-              </text>
-            );
-          })()}
-        </svg>
+              {visibleLayers.balconies &&
+                result.spaces
+                  .filter((s) => s.spaceType === "balcony")
+                  .map((space) => (
+                    <polygon
+                      key={space.id}
+                      points={polygonToPoints(space.geometry)}
+                      fill={SPACE_COLORS.balcony}
+                      fillOpacity={0.7}
+                      stroke="#10b981"
+                      strokeWidth={1}
+                      onClick={() => selectObject(space.id)}
+                      style={{ cursor: "pointer" }}
+                    />
+                  ))}
+
+              {/* Openings / entrances */}
+              {visibleLayers.unitEntrances &&
+                result.openings
+                  .filter((o) => o.openingType === "unit_entrance")
+                  .map((opening) => (
+                    <polygon
+                      key={opening.id}
+                      points={polygonToPoints(opening.geometry)}
+                      fill="#dc2626"
+                      fillOpacity={0.8}
+                      stroke="#991b1b"
+                      strokeWidth={1}
+                    />
+                  ))}
+
+              {/* Labels for selected object */}
+              {selectedId && (() => {
+                const space = result.spaces.find((s) => s.id === selectedId);
+                const unit = result.units.find((u) => u.id === selectedId);
+                const obj = space ?? unit;
+                if (!obj) return null;
+                const cx = obj.geometry.reduce((s, p) => s + p[0], 0) / obj.geometry.length;
+                const cy = obj.geometry.reduce((s, p) => s + p[1], 0) / obj.geometry.length;
+                const area = "areaM2" in obj ? obj.areaM2 : undefined;
+                return (
+                  <text
+                    x={cx}
+                    y={cy}
+                    textAnchor="middle"
+                    fontSize="14"
+                    fill="#1e293b"
+                    fontWeight="bold"
+                  >
+                    {selectedId}
+                    {area != null && ` · ${formatArea(area)}`}
+                    {" · "}
+                    {formatConfidence(obj.confidence)}
+                  </text>
+                );
+              })()}
+            </svg>
+          </div>
+        </div>
       </div>
     </div>
   );
