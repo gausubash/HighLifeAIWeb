@@ -45,7 +45,11 @@ export type RelationshipType =
   | "door_to_wall"
   | "room_window_exterior"
   | "unit_to_room"
-  | "room_label_assignment";
+  | "unit_contains_room"
+  | "room_label_assignment"
+  | "room_contains_fixture"
+  | "floor_contains_unit"
+  | "floor_contains_common";
 
 export interface Point {
   x: number;

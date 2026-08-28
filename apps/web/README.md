@@ -10,6 +10,6 @@ npm install
 npm run dev
 ```
 
-Optional local floor-plan API: `NEXT_PUBLIC_FLOOR_PLAN_API_URL=http://127.0.0.1:8001` (`src/lib/api/floorPlanClient.ts`). The workspace viewer and scale calibration still use localStorage/IndexedDB until later prompts wire this client.
+Optional local floor-plan API: `NEXT_PUBLIC_FLOOR_PLAN_API_URL=http://127.0.0.1:8001` (`src/lib/api/floorPlanClient.ts`). Auth, projects, and plan files persist to Supabase. Page rasters also cache in IndexedDB for local Detect.
 
-Optional inference mock: `NEXT_PUBLIC_INFERENCE_API_URL=http://127.0.0.1:8000` (`src/lib/api/inferenceClient.ts`). That URL is for **this PC’s** mock server only — not a public RACE endpoint.
+Optional inference: `NEXT_PUBLIC_INFERENCE_API_URL=http://127.0.0.1:8000` (`src/lib/api/inferenceClient.ts`). That URL is for **this PC’s** uvicorn server only — not a public RACE endpoint.

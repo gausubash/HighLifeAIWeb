@@ -7,6 +7,7 @@ import { pixelDistance } from "@/lib/scale/parseScale";
 import { clientToImagePixels, loupeImageStyle } from "./imageCoords";
 import { useViewerStore } from "./useViewerStore";
 import { clampPanToViewport, clampZoom } from "./viewBounds";
+import { OcrHighlightsSvg } from "./OcrHighlightsSvg";
 
 const OverlayHost = dynamic(
   () => import("@/features/plan-editor/OverlayHost").then((m) => m.OverlayHost),
@@ -28,6 +29,24 @@ interface PdfPageViewerProps {
   measureLabel?: string | null;
   onMeasurePoint?: (point: PointPx) => void;
   enableOverlay?: boolean;
+  /** Project drawings show detections only; Model Studio passes `annotate`. */
+  overlayMode?: "annotate" | "detections";
+  /** Live tile window while streaming detect (image pixels). */
+  activeDetectTile?: { x: number; y: number; width: number; height: number } | null;
+  detectProgressLabel?: string | null;
+  /** Layout crop currently being OCR'd (image pixels). */
+  ocrRegion?: { x: number; y: number; width: number; height: number } | null;
+  /** Live OCR tile window inside that crop (image pixels). */
+  activeOcrTile?: { x: number; y: number; width: number; height: number } | null;
+  ocrProgressLabel?: string | null;
+  /** OCR line highlights drawn over the page (image pixel coords). */
+  ocrHighlights?: { x: number; y: number; width: number; height: number; text: string }[];
+  /** Enable select/move/resize on detected layout regions. */
+  layoutEditMode?: boolean;
+  /** Show magnifier loupe toggle (annotate / precision picking). */
+  showLoupeToggle?: boolean;
+  /** Show OCR text overlay toggle (analysis page). */
+  showOcrToggle?: boolean;
 }
 
 type LoupeState = {
@@ -50,20 +69,33 @@ export function PdfPageViewer({
   measureLabel = null,
   onMeasurePoint,
   enableOverlay = true,
+  overlayMode = "detections",
+  activeDetectTile = null,
+  detectProgressLabel = null,
+  ocrRegion = null,
+  activeOcrTile = null,
+  ocrProgressLabel = null,
+  ocrHighlights = [],
+  layoutEditMode = false,
+  showLoupeToggle = false,
+  showOcrToggle = true,
 }: PdfPageViewerProps) {
   const dragging = useRef(false);
   const lastPos = useRef({ x: 0, y: 0 });
   const imgRef = useRef<HTMLImageElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
-  const { zoom, panX, panY, setZoom, setPan, resetView } = useViewerStore();
+  const { zoom, panX, panY, setZoom, setPan, resetView, showOcrText, toggleShowOcrText } =
+    useViewerStore();
   const [loupe, setLoupe] = useState<LoupeState | null>(null);
+  const [annotateLoupe, setAnnotateLoupe] = useState(false);
   /** Uniform scale so the page fits the viewport without stretching. */
   const [fitScale, setFitScale] = useState(1);
   const picking = toolMode !== "none";
+  const loupeActive = picking || (showLoupeToggle && annotateLoupe);
 
   useEffect(() => {
-    if (!picking) setLoupe(null);
-  }, [picking]);
+    if (!loupeActive) setLoupe(null);
+  }, [loupeActive]);
 
   useEffect(() => {
     const el = viewportRef.current;
@@ -141,7 +173,7 @@ export function PdfPageViewer({
 
   const updateLoupe = useCallback(
     (clientX: number, clientY: number) => {
-      if (!picking) {
+      if (!loupeActive) {
         setLoupe(null);
         return;
       }
@@ -191,7 +223,7 @@ export function PdfPageViewer({
         imgHeight: placed.height,
       });
     },
-    [picking, getDisplayRect, widthPx, heightPx],
+    [loupeActive, getDisplayRect, widthPx, heightPx],
   );
 
   const handleMouseDown = useCallback(
@@ -214,17 +246,15 @@ export function PdfPageViewer({
 
   const handleMouseMove = useCallback(
     (e: React.MouseEvent) => {
-      if (picking) {
-        updateLoupe(e.clientX, e.clientY);
-        return;
-      }
+      if (loupeActive) updateLoupe(e.clientX, e.clientY);
+      if (picking) return;
       if (!dragging.current) return;
       const dx = e.clientX - lastPos.current.x;
       const dy = e.clientY - lastPos.current.y;
       lastPos.current = { x: e.clientX, y: e.clientY };
       applyPan(panX + dx, panY + dy);
     },
-    [picking, updateLoupe, panX, panY, applyPan],
+    [loupeActive, picking, updateLoupe, panX, panY, applyPan],
   );
 
   const handleMouseUp = useCallback(() => {
@@ -241,9 +271,17 @@ export function PdfPageViewer({
     setLoupe(null);
   }, []);
 
+  const handleOverlayPointerMove = useCallback(
+    (clientX: number, clientY: number) => {
+      if (loupeActive) updateLoupe(clientX, clientY);
+    },
+    [loupeActive, updateLoupe],
+  );
+
   const p1 = measurePoints[0];
   const p2 = measurePoints[1];
   const distPx = p1 && p2 ? pixelDistance(p1, p2) : null;
+  const visibleOcrHighlights = showOcrToggle && !showOcrText ? [] : ocrHighlights;
 
   return (
     <div className="relative flex h-full min-h-0 flex-col">
@@ -267,6 +305,20 @@ export function PdfPageViewer({
           )}
         </div>
       )}
+      {detectProgressLabel || ocrProgressLabel ? (
+        <div className="pointer-events-none absolute left-3 top-3 z-30 flex flex-col gap-1">
+          {detectProgressLabel ? (
+            <span className="rounded bg-sky-900/90 px-2 py-1 text-[11px] font-medium text-white shadow-sm">
+              {detectProgressLabel}
+            </span>
+          ) : null}
+          {ocrProgressLabel ? (
+            <span className="rounded bg-teal-900/90 px-2 py-1 text-[11px] font-medium text-white shadow-sm">
+              {ocrProgressLabel}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
 
       <div
         ref={viewportRef}
@@ -306,10 +358,23 @@ export function PdfPageViewer({
                 displayHeight={stageH}
                 zoom={zoom}
                 passThrough={picking}
+                overlayMode={overlayMode}
+                activeTile={activeDetectTile}
+                ocrRegion={ocrRegion}
+                activeOcrTile={activeOcrTile}
+                layoutEditMode={layoutEditMode}
                 onBackgroundPanStart={startBackgroundPan}
                 onPanBy={(dx, dy) => applyPan(panX + dx, panY + dy)}
+                onPointerMove={loupeActive ? handleOverlayPointerMove : undefined}
               />
             )}
+            {visibleOcrHighlights.length > 0 ? (
+              <OcrHighlightsSvg
+                highlights={visibleOcrHighlights}
+                pageWidthPx={widthPx}
+                pageHeightPx={heightPx}
+              />
+            ) : null}
             {(p1 || p2) && (
               <svg
                 className="pointer-events-none absolute inset-0 h-full w-full"
@@ -431,7 +496,7 @@ export function PdfPageViewer({
           </div>
         </div>
 
-        {picking && loupe && (
+        {loupeActive && loupe && (
           <>
             {/* Open crosshair under the cursor (exact pick point) */}
             <div
@@ -524,6 +589,47 @@ export function PdfPageViewer({
         >
           Fit
         </button>
+        {showOcrToggle ? (
+          <button
+            type="button"
+            className={
+              showOcrText
+                ? "flex h-7 items-center border-l border-slate-200 bg-indigo-700 px-2.5 text-[11px] font-medium text-white hover:bg-indigo-800"
+                : "flex h-7 items-center border-l border-slate-200 px-2.5 text-[11px] font-medium text-slate-700 hover:bg-slate-100"
+            }
+            title={showOcrText ? "Hide OCR text on plan" : "Show OCR text on plan"}
+            aria-pressed={showOcrText}
+            onClick={() => toggleShowOcrText()}
+          >
+            OCR text
+          </button>
+        ) : null}
+        {showLoupeToggle ? (
+          <button
+            type="button"
+            className={
+              annotateLoupe
+                ? "flex h-7 items-center border-l border-slate-200 bg-teal-800 px-2 text-white hover:bg-teal-900"
+                : "flex h-7 items-center border-l border-slate-200 px-2 text-slate-700 hover:bg-slate-100"
+            }
+            title="Magnifier loupe — zoom under cursor while annotating"
+            aria-pressed={annotateLoupe}
+            onClick={() => setAnnotateLoupe((on) => !on)}
+          >
+            <svg
+              viewBox="0 0 24 24"
+              className="h-4 w-4"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              aria-hidden
+            >
+              <circle cx="10" cy="10" r="6" />
+              <path d="M14.5 14.5L20 20" strokeLinecap="round" />
+              <circle cx="10" cy="10" r="2.5" fill="currentColor" stroke="none" />
+            </svg>
+          </button>
+        ) : null}
       </div>
     </div>
   );

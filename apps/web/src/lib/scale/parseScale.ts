@@ -15,28 +15,44 @@ export const A_PAPER_SIZES_MM: Record<string, [number, number]> = {
 };
 
 const SCALE_PAPER_RE =
-  /(?:scale\s*[:=]?\s*)?(?:[1lI|]\s*[:\/\-．.]\s*)(\d{1,5})(?:\s*[@©]\s*|\s+)(?:iso\s*)?([ab]\s*[0-5])[a-z]?/i;
+  /(?:scale\s*[:=]?\s*)?(?:[1lI|]\s*[:/\-．.=]\s*)(\d{1,5})\s*[@©]\s*(?:iso\s*)?([ab]\s*[0-5])[a-z]?/i;
 
 const SCALE_RATIO_ONLY_RE =
-  /(?:scale\s*[:=]?\s*)?(?:[1lI|]\s*[:\/\-．.]\s*)(\d{1,5})\b/gi;
+  /(?:scale\s*[:=]?\s*)?(?:[1lI|]\s*[:/\-．.=]\s*)(\d{1,5})\b/gi;
 
-function normalizeOcrScaleText(text: string): string {
+const PAPER_ONLY_RE = /(?:@|©)\s*(?:iso\s*)?([ab]\s*[0-5])[a-z]?\b/i;
+
+export function normalizeOcrScaleText(text: string): string {
   if (!text) return "";
   let t = text
     .replace(/：/g, ":")
     .replace(/／/g, "/")
     .replace(/－/g, "-")
     .replace(/．/g, ".")
-    .replace(/×/g, "x");
+    .replace(/×/g, "x")
+    .replace(/©/g, "@");
+
+  // Fix OCR letter 'O'/'o' replacing zero in scale ratios: 1:10O -> 1:100, 1:5O -> 1:50
+  t = t.replace(/\b1\s*[:/\-.]\s*(\d{1,4})[Oo]\b/g, "1:$10");
+  t = t.replace(/\b1\s*[:/\-.]\s*(\d{1,3})[Oo][Oo]\b/g, "1:$100");
+  t = t.replace(/\b1\s*[:/\-.]\s*[Oo]\b/g, "1:0");
+
+  // Normalize "1 to 100", "1 - 100", "1 = 100", "1 / 100", "1 : 100"
+  t = t.replace(/\b1\s+(?:to|TO)\s+(\d{1,5})\b/g, "1:$1");
+  t = t.replace(/\b([1lI|])\s*[:/\-．.=]\s*(\d{1,5})\b/g, "1:$2");
+
+  // Normalize leading OCR pipe/l/I
   t = t.replace(/(?<![0-9a-z])[lI|]\s*[:/]/gi, "1:");
   t = t.replace(/(scale\s*[:=]?\s*)1\s*[.\-]\s*(\d{2,5})\b/gi, "$11:$2");
   t = t.replace(/\b1\s*[.\-]\s*(\d{2,5})\s*([@©]|\bA\s*[0-5]\b)/gi, "1:$1 $2");
+
+  // Fix spaces in paper codes: "A 1" -> "A1", "ISO A 3" -> "ISO A3"
   t = t.replace(/\b([AB])\s*([0-5])[A-Za-z.]?\b/gi, "$1$2");
   t = t.replace(/[ \t]+/g, " ");
   return t;
 }
 
-function normalizePaperCode(paper: string | null): string | null {
+export function normalizePaperCode(paper: string | null): string | null {
   if (!paper) return null;
   const code = paper.toUpperCase().trim().replace("ISO ", "").replace(/ /g, "");
   const m = code.match(/^([AB][0-5])/);
@@ -45,6 +61,10 @@ function normalizePaperCode(paper: string | null): string | null {
   return null;
 }
 
+/**
+ * Parses single string containing both scale (1:N) and paper (@ AX).
+ * Examples: "SCALE 1:100 @ A1", "1:200 @ A3", "1:50@A1".
+ */
 export function parseScaleAndPaper(text: string): { scale: number; paper: string } | null {
   if (!text) return null;
   const normalized = normalizeOcrScaleText(text);
@@ -59,34 +79,231 @@ export function parseScaleAndPaper(text: string): { scale: number; paper: string
   for (const candidate of candidates) {
     if (!candidate || seen.has(candidate)) continue;
     seen.add(candidate);
+
     const match = SCALE_PAPER_RE.exec(candidate);
-    if (!match) continue;
-    const scale = parseInt(match[1], 10);
-    const paper = normalizePaperCode(match[2]);
-    if (paper && scale >= 1 && scale <= 10000) {
-      return { scale, paper };
+    if (match) {
+      const scale = parseInt(match[1], 10);
+      const paper = normalizePaperCode(match[2]);
+      if (paper && scale >= 1 && scale <= 10000) {
+        return { scale, paper };
+      }
     }
   }
   return null;
 }
 
+/**
+ * Parses drawing scale ratio in 1:N format (e.g. "SCALE 1:100", "1:200", "1/50").
+ * Always requires the "1:" prefix.
+ */
 export function parseScaleRatio(text: string): number | null {
   if (!text) return null;
   const decl = parseScaleAndPaper(text);
   if (decl) return decl.scale;
   const normalized = normalizeOcrScaleText(text);
+
+  // 1. Prioritize lines explicitly containing the word "scale"
+  const lines = text.split(/\r?\n/).concat(normalized.split(/\r?\n/));
+  for (const line of lines) {
+    if (/scale/i.test(line)) {
+      const match = /(?:scale\s*[:=]?\s*)?[1lI|]\s*[:/\-．.=]\s*(\d{1,5})\b/i.exec(line);
+      if (match) {
+        const val = parseInt(match[1], 10);
+        if (val >= 1 && val <= 10000) return val;
+      }
+    }
+  }
+
+  // 2. Standard architectural scale ratios (1:N)
+  const ARCH_SCALES = [
+    50, 100, 200, 500, 20, 25, 75, 125, 150, 250, 300, 400, 750, 1000, 1250, 1500,
+    2000, 2500, 5000, 10, 5, 2, 1,
+  ];
+  for (const candidate of [text, normalized]) {
+    const re = /(?:[1lI|]\s*[:/\-．.=]\s*)(\d{1,5})\b/gi;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(candidate)) !== null) {
+      const scale = parseInt(m[1], 10);
+      if (ARCH_SCALES.includes(scale)) {
+        return scale;
+      }
+    }
+  }
+
+  // 3. Fallback to any valid 1:N ratio
   let best: number | null = null;
   for (const candidate of [text, normalized]) {
     const re = new RegExp(SCALE_RATIO_ONLY_RE.source, "gi");
     let m: RegExpExecArray | null;
     while ((m = re.exec(candidate)) !== null) {
       const scale = parseInt(m[1], 10);
-      if (scale >= 5 && scale <= 10000) {
+      if (scale >= 1 && scale <= 10000) {
         if (best === null || scale > best) best = scale;
       }
     }
   }
   return best;
+}
+
+/**
+ * Parses paper size from text strictly preceded by '@' (e.g. "@ A1", "@ A3", "@A1", "@ ISO A1").
+ */
+export function parsePaperFromText(text: string): string | null {
+  if (!text) return null;
+  for (const candidate of [text, normalizeOcrScaleText(text)]) {
+    if (!candidate) continue;
+    const match = PAPER_ONLY_RE.exec(candidate);
+    if (match) {
+      const paper = normalizePaperCode(match[1]);
+      if (paper) return paper;
+    }
+  }
+  return null;
+}
+
+export function formatScaleDeclaration(scale: number, paper?: string | null): string {
+  return paper ? `1:${scale} @ ${paper}` : `1:${scale}`;
+}
+
+type OcrScaleLine = {
+  text?: string | null;
+  bbox?: [number, number][] | null;
+  confidence?: number | null;
+};
+
+type LineBox = { x0: number; y0: number; x1: number; y1: number; cx: number; cy: number; w: number; h: number };
+
+function ocrLineBox(bbox: [number, number][] | null | undefined): LineBox | null {
+  if (!Array.isArray(bbox) || bbox.length < 2) return null;
+  const xs: number[] = [];
+  const ys: number[] = [];
+  for (const pt of bbox) {
+    if (!Array.isArray(pt) || pt.length < 2) continue;
+    const x = Number(pt[0]);
+    const y = Number(pt[1]);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+    xs.push(x);
+    ys.push(y);
+  }
+  if (xs.length < 2) return null;
+  const x0 = Math.min(...xs);
+  const y0 = Math.min(...ys);
+  const x1 = Math.max(...xs);
+  const y1 = Math.max(...ys);
+  const w = Math.max(1, x1 - x0);
+  const h = Math.max(1, y1 - y0);
+  return { x0, y0, x1, y1, cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, w, h };
+}
+
+function tokensSpatiallyNearby(a: LineBox, b: LineBox): boolean {
+  const h = Math.max(a.h, b.h, 10);
+  const gapX = Math.max(0, a.x0 - b.x1, b.x0 - a.x1);
+  const gapY = Math.max(0, a.y0 - b.y1, b.y0 - a.y1);
+  // Title-block tokens sit on one row or stacked in the same cell.
+  return gapX <= h * 12 && gapY <= h * 5;
+}
+
+function scaleTokensNearby(
+  a: { box: LineBox | null; index: number },
+  b: { box: LineBox | null; index: number },
+): boolean {
+  if (a.box && b.box) return tokensSpatiallyNearby(a.box, b.box);
+  return Math.abs(a.index - b.index) <= 2;
+}
+
+/**
+ * Normalizes OCR scale output to `1:N @ AX` when ratio (1:N) and paper (@ AX) are present.
+ * When OCR splits "SCALE", "1:100", and "@ A1" across lines, tokens are clustered by
+ * bounding-box position (not list order). Falls back to nearby list indices when boxes are missing.
+ */
+export function canonicalScaleText(
+  scaleText: string | null | undefined,
+  paperSize?: string | null,
+  extraLines?: OcrScaleLine[],
+): string | null {
+  if (!scaleText?.trim() && !paperSize && !extraLines?.length) return null;
+
+  // 1. Check if scaleText itself has combined 1:N @ AX
+  if (scaleText) {
+    const directDecl = parseScaleAndPaper(scaleText);
+    if (directDecl) return formatScaleDeclaration(directDecl.scale, directDecl.paper);
+  }
+
+  // 2. Check each line individually for combined 1:N @ AX
+  if (extraLines) {
+    for (const line of extraLines) {
+      const lineDecl = parseScaleAndPaper(line.text ?? "");
+      if (lineDecl) return formatScaleDeclaration(lineDecl.scale, lineDecl.paper);
+    }
+  }
+
+  // 3. Cluster SCALE / 1:N / @ AX by position
+  if (extraLines && extraLines.length > 0) {
+    type Token = { index: number; box: LineBox | null; text: string };
+
+    const labels: Token[] = [];
+    const ratios: (Token & { scale: number; onScaleLine: boolean })[] = [];
+    const papers: (Token & { paper: string })[] = [];
+
+    extraLines.forEach((line, index) => {
+      const text = line.text ?? "";
+      if (!text.trim()) return;
+      const box = ocrLineBox(line.bbox);
+      const token = { index, box, text };
+      const ratio = parseScaleRatio(text);
+      const paper = parsePaperFromText(text);
+      if (/\bscale\b/i.test(text)) labels.push(token);
+      if (ratio) {
+        ratios.push({ ...token, scale: ratio, onScaleLine: /\bscale\b/i.test(text) });
+      }
+      if (paper) papers.push({ ...token, paper });
+    });
+
+    const nearScaleLabel = (token: Token) =>
+      labels.some((label) => scaleTokensNearby(token, label));
+
+    let bestPair: { scale: number; paper: string; score: number } | null = null;
+    for (const ratio of ratios) {
+      for (const paper of papers) {
+        if (!scaleTokensNearby(ratio, paper)) continue;
+        const labeled = ratio.onScaleLine || nearScaleLabel(ratio) || nearScaleLabel(paper);
+        let score = labeled ? 20 : 8;
+        if (ratio.box && paper.box) {
+          score -= Math.hypot(ratio.box.cx - paper.box.cx, ratio.box.cy - paper.box.cy) / 40;
+        } else {
+          score -= Math.abs(ratio.index - paper.index);
+        }
+        if (!bestPair || score > bestPair.score) {
+          bestPair = { scale: ratio.scale, paper: paper.paper, score };
+        }
+      }
+    }
+
+    if (bestPair) {
+      return formatScaleDeclaration(bestPair.scale, bestPair.paper);
+    }
+
+    if (ratios.length > 0) {
+      const labeled = ratios.filter((r) => r.onScaleLine || nearScaleLabel(r));
+      const pool = labeled.length ? labeled : ratios;
+      pool.sort((a, b) => (b.onScaleLine ? 1 : 0) - (a.onScaleLine ? 1 : 0));
+      const paperFromParam =
+        paperSize && (parsePaperFromText(scaleText ?? "") || scaleText?.includes("@"))
+          ? normalizePaperCode(paperSize)
+          : null;
+      return formatScaleDeclaration(pool[0].scale, paperFromParam);
+    }
+  }
+
+  // 4. Fallback ratio from scaleText
+  const singleRatio = parseScaleRatio(scaleText ?? "");
+  if (singleRatio) {
+    const singlePaper =
+      parsePaperFromText(scaleText ?? "") ?? (paperSize ? normalizePaperCode(paperSize) : null);
+    return formatScaleDeclaration(singleRatio, singlePaper);
+  }
+
+  return scaleText?.trim() || null;
 }
 
 function pointsToMm(pt: number): number {

@@ -1,0 +1,19 @@
+# Local PaddleOCR for sheet text (title block, scale, level, unit labels).
+# Use a dedicated Python 3.10–3.12 venv (not the main 3.14 API venv, and preferably
+# not .venv-tf if that already has NumPy 2.x for TensorFlow):
+#
+#   py -3.11 -m venv .venv-ocr
+#   .venv-ocr\Scripts\python.exe -m pip install -U pip
+#   .venv-ocr\Scripts\python.exe -m pip install -r requirements-paddle.txt
+#
+# Then in services/inference/.env:
+#   PADDLE_OCR_ENABLED=true
+#   VLM_PROVIDER=paddleocr
+#   PADDLE_OCR_PYTHON=C:\...\services\inference\.venv-ocr\Scripts\python.exe
+#
+# First OCR run downloads detection/recognition models (~100MB+).
+
+numpy>=1.23.5,<2
+paddlepaddle>=2.6.2,<3
+paddleocr==2.7.3
+Pillow>=10.0.0

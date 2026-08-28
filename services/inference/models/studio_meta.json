@@ -1,0 +1,8 @@
+{
+  "studio_framework": "tensorflow-floordata-unet",
+  "kind": "unet",
+  "imgsz": 512,
+  "num_classes": 1,
+  "bootstrap": "imagenet_backbone_untrained_decoder",
+  "note": "Replace with a Studio fine-tune or floorData-trained checkpoint for usable walls."
+}

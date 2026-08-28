@@ -6,13 +6,14 @@ import { FormEvent, Suspense, useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth/AuthProvider";
 
 function SignInForm() {
-  const { user, ready, signIn } = useAuth();
+  const { user, ready, configured, signIn, signUp } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
   const nextPath = searchParams.get("next") || "/projects";
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [mode, setMode] = useState<"signin" | "signup">("signin");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -26,7 +27,7 @@ function SignInForm() {
     e.preventDefault();
     setError(null);
     setSubmitting(true);
-    const result = await signIn(email, password);
+    const result = mode === "signup" ? await signUp(email, password) : await signIn(email, password);
     setSubmitting(false);
     if (!result.ok) {
       setError(result.error);
@@ -49,11 +50,20 @@ function SignInForm() {
       </header>
 
       <main className="mx-auto flex w-full max-w-md flex-1 flex-col justify-center px-5 py-12">
-        <h1 className="font-display text-3xl font-semibold tracking-tight">Sign in</h1>
+        <h1 className="font-display text-3xl font-semibold tracking-tight">
+          {mode === "signup" ? "Create account" : "Sign in"}
+        </h1>
         <p className="mt-2 text-sm text-slate-600">
-          Sign in with your email and a password (at least 4 characters) to open the workspace on
-          this device.
+          Use your HighLife email and a password (at least 6 characters). Projects and drawings are
+          stored in Supabase. Detect still runs on this PC at localhost:8000.
         </p>
+
+        {!configured && (
+          <p className="mt-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+            Add NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY to{" "}
+            <code>apps/web/.env.local</code>, then restart the Next.js server.
+          </p>
+        )}
 
         <form onSubmit={onSubmit} className="mt-8 space-y-4">
           <div>
@@ -77,8 +87,9 @@ function SignInForm() {
             <input
               id="password"
               type="password"
-              autoComplete="current-password"
+              autoComplete={mode === "signup" ? "new-password" : "current-password"}
               required
+              minLength={6}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
@@ -91,10 +102,27 @@ function SignInForm() {
             </p>
           )}
 
-          <button type="submit" disabled={submitting} className="btn-primary w-full">
-            {submitting ? "Signing in…" : "Sign in to workspace"}
+          <button type="submit" disabled={submitting || !configured} className="btn-primary w-full">
+            {submitting
+              ? mode === "signup"
+                ? "Creating account…"
+                : "Signing in…"
+              : mode === "signup"
+                ? "Create account"
+                : "Sign in to workspace"}
           </button>
         </form>
+
+        <button
+          type="button"
+          className="mt-4 text-sm text-slate-600 underline-offset-2 hover:text-[var(--hl-moss)] hover:underline"
+          onClick={() => {
+            setMode(mode === "signup" ? "signin" : "signup");
+            setError(null);
+          }}
+        >
+          {mode === "signup" ? "Already have an account? Sign in" : "Need an account? Create one"}
+        </button>
       </main>
     </div>
   );

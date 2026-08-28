@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useLayoutStore } from "@/features/plan-viewer/useLayoutStore";
 import { useAnalyses, useProjects } from "@/hooks/useProjectStore";
-import { projectStore } from "@/lib/mock/store";
+import { projectStore } from "@/lib/data/projectStore";
 import type { Project } from "@highlife/shared-types";
 import { cn, formatDate } from "@/lib/utils";
 
@@ -80,39 +80,39 @@ export function ProjectSidebar() {
     setConfirmDelete(false);
   };
 
-  const handleDeleteProject = (projectId: string) => {
+  const handleDeleteProject = async (projectId: string) => {
     if (!confirmDelete) {
       setConfirmDelete(true);
       return;
     }
-    projectStore.deleteProject(projectId);
+    await projectStore.deleteProject(projectId);
     closeMenus();
     if (activeProjectId === projectId) router.push("/projects");
   };
 
-  const handleDeleteDrawing = (drawingId: string) => {
+  const handleDeleteDrawing = async (drawingId: string) => {
     if (!confirmDelete) {
       setConfirmDelete(true);
       return;
     }
-    projectStore.deleteAnalysis(drawingId);
+    await projectStore.deleteAnalysis(drawingId);
     closeMenus();
     if (activeAnalysisId === drawingId && activeProjectId) {
       router.push(`/projects/${activeProjectId}`);
     }
   };
 
-  const handleRenameProject = (project: Project) => {
+  const handleRenameProject = async (project: Project) => {
     const nextName = window.prompt("Rename project", project.name);
     if (!nextName) return;
     const trimmed = nextName.trim();
     if (!trimmed || trimmed === project.name) return;
-    projectStore.updateProject(project.id, { name: trimmed });
+    await projectStore.updateProject(project.id, { name: trimmed });
     closeMenus();
   };
 
   return (
-    <aside className="flex h-full w-60 shrink-0 flex-col border-r border-slate-200 bg-white">
+    <aside className="flex h-full w-full shrink-0 flex-col border-r border-slate-200 bg-white">
       <div className="min-h-0 flex-1 overflow-y-auto py-1">
         <SectionHeader
           title="Projects"
@@ -302,6 +302,14 @@ export function ProjectSidebar() {
             )}
           </>
         )}
+      </div>
+      <div className="border-t border-slate-200 px-2 py-2">
+        <Link
+          href="/studio"
+          className="block rounded px-2 py-1.5 text-[11px] text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+        >
+          Model Studio →
+        </Link>
       </div>
     </aside>
   );

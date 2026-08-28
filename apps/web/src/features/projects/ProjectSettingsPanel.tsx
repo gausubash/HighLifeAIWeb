@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import type { Project } from "@highlife/shared-types";
-import { projectStore } from "@/lib/mock/store";
+import { projectStore } from "@/lib/data/projectStore";
 
 interface ProjectSettingsPanelProps {
   project: Project;
@@ -33,7 +33,7 @@ export function ProjectSettingsPanel({
     setConfirmDelete(false);
   }, [project]);
 
-  const handleSave = () => {
+  const handleSave = async () => {
     setError(null);
     const trimmedName = name.trim();
     if (!trimmedName) {
@@ -41,29 +41,36 @@ export function ProjectSettingsPanel({
       return;
     }
 
-    const updated = projectStore.updateProject(project.id, {
-      name: trimmedName,
-      description: description.trim() || undefined,
-      jurisdiction: jurisdiction.trim(),
-      policyVersion: policyVersion.trim(),
-    });
-
-    if (updated) onUpdated?.(updated);
+    try {
+      const updated = await projectStore.updateProject(project.id, {
+        name: trimmedName,
+        description: description.trim() || undefined,
+        jurisdiction: jurisdiction.trim(),
+        policyVersion: policyVersion.trim(),
+      });
+      if (updated) onUpdated?.(updated);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not save project.");
+    }
   };
 
-  const handleDelete = () => {
+  const handleDelete = async () => {
     if (!confirmDelete) {
       setConfirmDelete(true);
       return;
     }
 
-    projectStore.deleteProject(project.id);
-    onDeleted?.();
-    router.push("/projects");
+    try {
+      await projectStore.deleteProject(project.id);
+      onDeleted?.();
+      router.push("/projects");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not delete project.");
+    }
   };
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 overflow-y-auto p-4">
       <div>
         <label htmlFor="project-name" className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-slate-500">
           Name
@@ -105,12 +112,18 @@ export function ProjectSettingsPanel({
         <label htmlFor="project-policy" className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-slate-500">
           Policy version
         </label>
-        <input
+        <select
           id="project-policy"
           value={policyVersion}
           onChange={(e) => setPolicyVersion(e.target.value)}
           className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
-        />
+        >
+          <option value="highlife_v1">highlife_v1 — Design Policy v1</option>
+          <option value="draft-v1">draft-v1 — Legacy draft</option>
+        </select>
+        <p className="mt-1 text-[10px] text-slate-500">
+          Used by Detect → Run policy check (configs/policies/version.yaml).
+        </p>
       </div>
 
       {error && <p className="text-xs text-red-600">{error}</p>}

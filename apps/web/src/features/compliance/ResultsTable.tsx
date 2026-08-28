@@ -1,8 +1,13 @@
-import type { AnalysisResult } from "@highlife/shared-types";
+"use client";
+
+import type { AnalysisResult, ComplianceResult } from "@highlife/shared-types";
 import { formatArea, formatConfidence } from "@/lib/utils";
+import { evidenceEntityIds } from "@/lib/export/analysisExport";
 
 interface ResultsTableProps {
   result: AnalysisResult;
+  onSelectEntity?: (id: string | null) => void;
+  selectedId?: string | null;
 }
 
 const RESULT_STYLES: Record<string, string> = {
@@ -13,7 +18,14 @@ const RESULT_STYLES: Record<string, string> = {
   not_implemented: "text-slate-500 bg-slate-50",
 };
 
-export function ResultsTable({ result }: ResultsTableProps) {
+export function ResultsTable({ result, onSelectEntity, selectedId }: ResultsTableProps) {
+  const focusRow = (cr: ComplianceResult) => {
+    const ids = evidenceEntityIds(cr);
+    const unit = result.units.find((u) => u.externalId === cr.unitExternalId);
+    const next = ids[0] ?? unit?.id ?? null;
+    onSelectEntity?.(next);
+  };
+
   return (
     <div className="space-y-6">
       <div>
@@ -33,8 +45,19 @@ export function ResultsTable({ result }: ResultsTableProps) {
             </thead>
             <tbody>
               {result.unitSummaries.map((u) => (
-                <tr key={u.unitId} className="border-b border-slate-100">
-                  <td className="py-2 pr-4 font-medium">{u.unitId}</td>
+                <tr
+                  key={u.unitId}
+                  className={`border-b border-slate-100 ${selectedId === u.unitId ? "bg-brand-50" : ""}`}
+                >
+                  <td className="py-2 pr-4 font-medium">
+                    <button
+                      type="button"
+                      className="text-left text-brand-700 hover:underline"
+                      onClick={() => onSelectEntity?.(u.unitId)}
+                    >
+                      {u.unitId}
+                    </button>
+                  </td>
                   <td className="py-2 pr-4">{formatArea(u.areaM2)}</td>
                   <td className="py-2 pr-4">{u.roomCount}</td>
                   <td className="py-2 pr-4">{u.bedroomCount}</td>
@@ -69,28 +92,59 @@ export function ResultsTable({ result }: ResultsTableProps) {
               </tr>
             </thead>
             <tbody>
-              {result.complianceResults.map((cr) => (
-                <tr key={cr.id} className="border-b border-slate-100">
-                  <td className="py-2 pr-4">{cr.unitExternalId}</td>
-                  <td className="py-2 pr-4 font-mono text-xs">{cr.ruleCode}</td>
-                  <td className="py-2 pr-4">
-                    <span className={`badge ${RESULT_STYLES[cr.result] ?? ""}`}>
-                      {cr.result}
-                    </span>
-                  </td>
-                  <td className="py-2 pr-4">
-                    {cr.measuredValue != null ? `${cr.measuredValue} ${cr.unit ?? ""}` : "—"}
-                  </td>
-                  <td className="py-2 pr-4">
-                    {cr.requiredValue != null ? `${cr.requiredValue} ${cr.unit ?? ""}` : "—"}
-                  </td>
-                  <td className="py-2">{formatConfidence(cr.confidence)}</td>
-                </tr>
-              ))}
+              {result.complianceResults.map((cr) => {
+                const ids = evidenceEntityIds(cr);
+                const active = selectedId != null && ids.includes(selectedId);
+                return (
+                  <tr
+                    key={cr.id}
+                    className={`cursor-pointer border-b border-slate-100 hover:bg-slate-50 ${
+                      active ? "bg-brand-50" : ""
+                    }`}
+                    onClick={() => focusRow(cr)}
+                  >
+                    <td className="py-2 pr-4">{cr.unitExternalId}</td>
+                    <td className="py-2 pr-4 font-mono text-xs">{cr.ruleCode}</td>
+                    <td className="py-2 pr-4">
+                      <span className={`badge ${RESULT_STYLES[cr.result] ?? ""}`}>
+                        {cr.result}
+                      </span>
+                    </td>
+                    <td className="py-2 pr-4">
+                      {cr.measuredValue != null ? `${cr.measuredValue} ${cr.unit ?? ""}` : "—"}
+                    </td>
+                    <td className="py-2 pr-4">
+                      {cr.requiredValue != null ? `${cr.requiredValue} ${cr.unit ?? ""}` : "—"}
+                    </td>
+                    <td className="py-2">{formatConfidence(cr.confidence)}</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
-        <p className="mt-2 text-xs text-slate-500">{result.complianceResults[0]?.explanation}</p>
+        <p className="mt-2 text-xs text-slate-500">
+          {result.complianceResults.map((cr) => (
+            <span key={cr.id} className="mb-1 block">
+              <span className="font-mono">{cr.ruleCode}</span>: {cr.explanation}
+            </span>
+          ))}
+        </p>
+        {result.reviewWarnings?.length ? (
+          <p className="mt-2 text-xs text-amber-700">
+            {result.reviewWarnings.map((w) => (
+              <span key={`${w.code}-${w.message}`} className="mb-1 block">
+                {w.code}: {w.message}
+              </span>
+            ))}
+          </p>
+        ) : null}
+        <p className="mt-2 text-[11px] text-slate-400">
+          Policy {result.policyVersion}
+          {result.modelVersions?.policy ? ` · pack ${result.modelVersions.policy}` : ""}
+          {result.modelVersions?.detect ? ` · detect ${result.modelVersions.detect}` : ""}
+          {onSelectEntity ? " · click a compliance row to highlight evidence" : ""}
+        </p>
       </div>
     </div>
   );

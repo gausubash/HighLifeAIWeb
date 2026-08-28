@@ -62,6 +62,36 @@ def test_detect_without_detectors_is_503() -> None:
         get_settings.cache_clear()
 
 
+def test_studio_dataset_lives_on_disk(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("HIGHLIFE_STUDIO_DIR", str(tmp_path))
+    from io import BytesIO
+
+    from PIL import Image
+
+    created = client.post("/v1/studio/datasets", json={"name": "Local", "task": "segment"})
+    assert created.status_code == 200
+    dataset_id = created.json()["id"]
+    buf = BytesIO()
+    Image.new("RGB", (8, 6), (240, 240, 240)).save(buf, format="PNG")
+    added = client.post(
+        f"/v1/studio/datasets/{dataset_id}/pages",
+        data={"sourceName": "plan.pdf", "pageNumber": "1"},
+        files={"file": ("page.png", buf.getvalue(), "image/png")},
+    )
+    assert added.status_code == 200
+    listed = client.get("/v1/studio/datasets")
+    assert listed.status_code == 200
+    assert listed.json()["datasets"][0]["image_count"] == 1
+
+
+def test_studio_train_needs_labels(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("HIGHLIFE_STUDIO_DIR", str(tmp_path))
+    created = client.post("/v1/studio/datasets", json={"name": "Empty", "task": "segment"})
+    dataset_id = created.json()["id"]
+    res = client.post("/v1/studio/train", json={"datasetId": dataset_id})
+    assert res.status_code == 400
+
+
 def test_analyze_mock() -> None:
     res = client.post(
         "/v1/analyze",

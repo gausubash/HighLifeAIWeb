@@ -1,6 +1,37 @@
 # Model registry — replaceable interfaces, versioned outputs
 models_version: "v0-yolo11-layout"
 
+walls:
+  source: https://drive.google.com/drive/folders/1MgW3Qo-8K4OrHi4ebvYd-81cTqQxwLgz
+  default_backend: mitunet
+  backends:
+    mitunet:
+      weights: models/mitunet_walls.pth
+      remote: https://media.githubusercontent.com/media/aliasstudio/mitunet/master/experiments/models/mitunet_finetune_a6_mit_b4_tversky_8864_28E.pth
+    yolo_obb:
+      weights: models/yolo_walls_obb.pt
+      remote: https://huggingface.co/GreenMap/yolo11x-blueprint-wall-detector/resolve/main/yolo_walls_obb.pt
+    cascade_swin:
+      weights: models/cascade_swin_latest.pth
+      env: WALL_CASCADE_SWIN_WEIGHTS
+    faster_rcnn:
+      weights: models/faster_rcnn_latest.pth
+      env: WALL_FASTER_RCNN_WEIGHTS
+    retinanet:
+      weights: models/retinanet_latest.pth
+      env: WALL_RETINANET_WEIGHTS
+    deeplab:
+      weights: models/deeplab_walls_best.h5
+      env: FLOORDATA_DEEPLAB_WEIGHTS
+      source: https://github.com/Divak-ar/floorData
+      framework: tensorflow
+      notes: DeepLabV3+ ResNet50; 512px binary wall mask → Hough line coords
+    unet_floordata:
+      weights: models/unet_walls_best.h5
+      source: https://github.com/Divak-ar/floorData
+      framework: tensorflow
+      notes: UNet notebook (UnetModel.ipynb); author recommends over DeepLab
+
 structural:
   name: yolo11x-blueprint-layout-detector
   version: "yolo_layout"

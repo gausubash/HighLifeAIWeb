@@ -12,31 +12,29 @@ export const LAYER_STROKE: Record<OverlayLayerId, string> = {
   review: "#db2777",
 };
 
-export const ROOM_FILL: Record<string, string> = {
-  living: "rgba(34, 197, 94, 0.22)",
-  bedroom: "rgba(59, 130, 246, 0.22)",
-  kitchen: "rgba(245, 158, 11, 0.22)",
-  bathroom: "rgba(14, 165, 233, 0.22)",
-  laundry: "rgba(249, 115, 22, 0.22)",
-  closet: "rgba(148, 163, 184, 0.28)",
-  store: "rgba(120, 113, 108, 0.22)",
-  balcony: "rgba(16, 185, 129, 0.28)",
-  lobby: "rgba(99, 102, 241, 0.22)",
-  common_corridor: "rgba(234, 179, 8, 0.22)",
-  unit: "rgba(168, 85, 247, 0.16)",
-  drawing_area: "rgba(37, 99, 235, 0.12)",
-  legend: "rgba(245, 158, 11, 0.22)",
-  legend_block: "rgba(245, 158, 11, 0.22)",
-  title_block: "rgba(15, 118, 110, 0.22)",
-  default: "rgba(37, 99, 235, 0.16)",
-};
+export function hexToRgba(hex: string, alpha: number): string {
+  const raw = hex.replace("#", "").trim();
+  const full =
+    raw.length === 3
+      ? raw
+          .split("")
+          .map((ch) => ch + ch)
+          .join("")
+      : raw;
+  const n = Number.parseInt(full, 16);
+  if (!Number.isFinite(n)) return `rgba(37, 99, 235, ${alpha})`;
+  const r = (n >> 16) & 255;
+  const g = (n >> 8) & 255;
+  const b = n & 255;
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+export function classFill(label?: unknown, alpha = 0.36): string {
+  return hexToRgba(classSwatch(label), alpha);
+}
 
 export function roomFill(roomType?: unknown): string {
-  if (typeof roomType === "string") {
-    const key = roomType.toLowerCase().replace(/\s+/g, "_");
-    if (key in ROOM_FILL) return ROOM_FILL[key];
-  }
-  return ROOM_FILL.default;
+  return classFill(roomType, 0.36);
 }
 
 export const CLASS_SWATCH: Record<string, string> = {
@@ -64,9 +62,17 @@ export const CLASS_SWATCH: Record<string, string> = {
   stair: "#64748b",
   lift: "#475569",
   drawing_area: "#2563eb",
+  "drawing area": "#2563eb",
+  main_floorplan: "#2563eb",
   legend: "#f59e0b",
   legend_block: "#f59e0b",
+  "legend block": "#f59e0b",
   title_block: "#0f766e",
+  "title block": "#0f766e",
+  drawing_border: "#64748b",
+  "drawing border": "#64748b",
+  revision_block: "#7c3aed",
+  "revision block": "#7c3aed",
   bed: "#3b82f6",
   sofa: "#22c55e",
   toilet: "#0ea5e9",

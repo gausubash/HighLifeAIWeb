@@ -107,6 +107,30 @@ def crop_page(
     )
 
 
+def crop_page_normalized(
+    rgb: np.ndarray,
+    crop: dict[str, float],
+    *,
+    pad_frac: float = 0.02,
+    min_pad: int = 4,
+) -> PageCrop | None:
+    """Crop using normalized fractions ``{x, y, width, height}`` in 0–1 page space."""
+    page_h, page_w = rgb.shape[:2]
+    if page_w < 1 or page_h < 1:
+        return None
+    try:
+        x = float(crop["x"])
+        y = float(crop["y"])
+        w = float(crop["width"])
+        h = float(crop["height"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    if w <= 0 or h <= 0:
+        return None
+    bbox = (x * page_w, y * page_h, w * page_w, h * page_h)
+    return crop_page(rgb, bbox, pad_frac=pad_frac, min_pad=min_pad)
+
+
 def full_page_crop(rgb: np.ndarray) -> PageCrop:
     page_h, page_w = rgb.shape[:2]
     return PageCrop(

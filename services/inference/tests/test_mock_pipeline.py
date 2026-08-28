@@ -42,12 +42,15 @@ def test_mock_pipeline_includes_compliance_results(mock_settings: Settings):
     assert cr.result.value in {"pass", "fail", "uncertain", "not_applicable", "not_implemented"}
 
 
-def test_real_mode_not_implemented():
+def test_real_mode_runs_policy_on_empty_detect():
     settings = Settings(_env_file=None, RUN_MODE=RunMode.REAL)
-    with pytest.raises(NotImplementedError):
-        run_pipeline(
-            analysis_id="test-003",
-            project_id="proj-001",
-            source_file_name="test.pdf",
-            settings=settings,
-        )
+    result = run_pipeline(
+        analysis_id="test-003",
+        project_id="proj-001",
+        source_file_name="test.pdf",
+        settings=settings,
+    )
+    assert result.analysis_id == "test-003"
+    assert len(result.compliance_results) >= 1
+    assert any(cr.rule_code == "HL-WALL-PRESENT" for cr in result.compliance_results)
+

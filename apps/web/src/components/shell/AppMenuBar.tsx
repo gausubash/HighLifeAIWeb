@@ -9,13 +9,20 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { projectStore } from "@/lib/mock/store";
-import { useLayoutStore } from "@/features/plan-viewer/useLayoutStore";
+import { projectStore } from "@/lib/data/projectStore";
+import {
+  INSPECTOR_WIDTH,
+  LEFT_PANEL_WIDTH,
+  SIDEBAR_WIDTH,
+  useLayoutStore,
+} from "@/features/plan-viewer/useLayoutStore";
 import { useProject } from "@/hooks/useProjectStore";
 import { useAuth } from "@/lib/auth/AuthProvider";
+import type { StudioTabId } from "@/features/studio/StudioTabBar";
+import { useStudioNavStore } from "@/features/studio/useStudioNavStore";
 import { cn } from "@/lib/utils";
 
-type MenuId = "file" | "project" | "view" | "account" | null;
+type MenuId = "file" | "project" | "studio" | "view" | "account" | null;
 
 function MenuItem({
   label,
@@ -63,10 +70,16 @@ export function AppMenuBar() {
 
   const sidebarOpen = useLayoutStore((s) => s.sidebarOpen);
   const inspectorOpen = useLayoutStore((s) => s.inspectorOpen);
+  const leftPanelOpen = useLayoutStore((s) => s.leftPanelOpen);
   const toggleSidebar = useLayoutStore((s) => s.toggleSidebar);
   const toggleInspector = useLayoutStore((s) => s.toggleInspector);
+  const toggleLeftPanel = useLayoutStore((s) => s.toggleLeftPanel);
   const setSidebarOpen = useLayoutStore((s) => s.setSidebarOpen);
   const setInspectorOpen = useLayoutStore((s) => s.setInspectorOpen);
+  const setLeftPanelOpen = useLayoutStore((s) => s.setLeftPanelOpen);
+  const setSidebarWidth = useLayoutStore((s) => s.setSidebarWidth);
+  const setLeftPanelWidth = useLayoutStore((s) => s.setLeftPanelWidth);
+  const setInspectorWidth = useLayoutStore((s) => s.setInspectorWidth);
 
   const projectMatch = pathname.match(/^\/projects\/([^/]+)/);
   const projectId =
@@ -75,6 +88,8 @@ export function AppMenuBar() {
 
   const analysisMatch = pathname.match(/\/analyses\/([^/]+)/);
   const analysisId = analysisMatch?.[1];
+  const inStudio = pathname.startsWith("/studio");
+  const setStudioTab = useStudioNavStore((s) => s.setTab);
 
   const close = useCallback(() => setOpenMenu(null), []);
 
@@ -104,29 +119,150 @@ export function AppMenuBar() {
     if (!next) return;
     const trimmed = next.trim();
     if (!trimmed || trimmed === project.name) return;
-    projectStore.updateProject(project.id, { name: trimmed });
+    void projectStore.updateProject(project.id, { name: trimmed });
   };
 
   const deleteActiveProject = () => {
     if (!project) return;
     if (!window.confirm(`Delete project “${project.name}” and all drawings?`)) return;
-    projectStore.deleteProject(project.id);
-    router.push("/projects");
+    void projectStore.deleteProject(project.id).then(() => router.push("/projects"));
   };
 
   const deleteActiveDrawing = () => {
     if (!analysisId) return;
     if (!window.confirm("Delete this drawing?")) return;
-    projectStore.deleteAnalysis(analysisId);
-    if (projectId) router.push(`/projects/${projectId}`);
-    else router.push("/projects");
+    void projectStore.deleteAnalysis(analysisId).then(() => {
+      if (projectId) router.push(`/projects/${projectId}`);
+      else router.push("/projects");
+    });
   };
 
   const menus: {
     id: Exclude<MenuId, null>;
     label: string;
     content: ReactNode;
-  }[] = [
+  }[] = inStudio
+    ? [
+        {
+          id: "file",
+          label: "File",
+          content: (
+            <>
+              <MenuItem
+                label="Back to projects"
+                onClick={() => run(() => router.push("/projects"))}
+              />
+              <MenuDivider />
+              <MenuItem
+                label="Model Studio home"
+                onClick={() =>
+                  run(() => {
+                    setStudioTab("datasets");
+                    router.push("/studio");
+                  })
+                }
+              />
+              <MenuItem
+                label="Detection & ML reference"
+                onClick={() => run(() => router.push("/docs"))}
+              />
+            </>
+          ),
+        },
+        {
+          id: "studio",
+          label: "Studio",
+          content: (
+            <>
+              {(
+                [
+                  ["datasets", "Datasets"],
+                  ["annotate", "Annotate"],
+                  ["train", "Train"],
+                  ["models", "Models"],
+                  ["infer", "Test"],
+                ] as Array<[StudioTabId, string]>
+              ).map(([id, label]) => (
+                <MenuItem
+                  key={id}
+                  label={label}
+                  onClick={() =>
+                    run(() => {
+                      setStudioTab(id);
+                      router.push("/studio");
+                    })
+                  }
+                />
+              ))}
+            </>
+          ),
+        },
+        {
+          id: "view",
+          label: "View",
+          content: (
+            <>
+              <MenuItem
+                label={sidebarOpen ? "Hide studio panel" : "Show studio panel"}
+                shortcut="Ctrl+B"
+                onClick={() => run(toggleSidebar)}
+              />
+              <MenuItem
+                label={leftPanelOpen ? "Hide pages panel" : "Show pages panel"}
+                onClick={() => run(toggleLeftPanel)}
+              />
+              <MenuItem
+                label={inspectorOpen ? "Hide inspector" : "Show inspector"}
+                shortcut="Ctrl+I"
+                onClick={() => run(toggleInspector)}
+              />
+              <MenuDivider />
+              <MenuItem
+                label="Reset layout"
+                onClick={() =>
+                  run(() => {
+                    setSidebarOpen(true);
+                    setLeftPanelOpen(true);
+                    setInspectorOpen(true);
+                    setSidebarWidth(SIDEBAR_WIDTH.default);
+                    setLeftPanelWidth(LEFT_PANEL_WIDTH.default);
+                    setInspectorWidth(INSPECTOR_WIDTH.default);
+                  })
+                }
+              />
+            </>
+          ),
+        },
+        {
+          id: "account",
+          label: "Account",
+          content: (
+            <>
+              <div className="px-3 py-1.5 text-[10px] text-slate-400">
+                {user?.email ?? "Signed in"}
+              </div>
+              <MenuDivider />
+              <MenuItem
+                label="Go to website"
+                onClick={() => run(() => router.push("/"))}
+              />
+              <MenuItem
+                label="Detection & ML reference"
+                onClick={() => run(() => router.push("/docs"))}
+              />
+              <MenuItem
+                label="Sign out"
+                onClick={() =>
+                  run(() => {
+                    void signOut().then(() => router.replace("/"));
+                  })
+                }
+              />
+            </>
+          ),
+        },
+      ]
+    : [
     {
       id: "file",
       label: "File",
@@ -140,6 +276,14 @@ export function AppMenuBar() {
           <MenuItem
             label="Open projects"
             onClick={() => run(() => router.push("/projects"))}
+          />
+          <MenuItem
+            label="Model Studio"
+            onClick={() => run(() => router.push("/studio"))}
+          />
+          <MenuItem
+            label="Detection & ML reference"
+            onClick={() => run(() => router.push("/docs"))}
           />
           <MenuDivider />
           <MenuItem
@@ -203,6 +347,10 @@ export function AppMenuBar() {
             onClick={() => run(toggleSidebar)}
           />
           <MenuItem
+            label={leftPanelOpen ? "Hide pages panel" : "Show pages panel"}
+            onClick={() => run(toggleLeftPanel)}
+          />
+          <MenuItem
             label={inspectorOpen ? "Hide inspector" : "Show inspector"}
             shortcut="Ctrl+I"
             onClick={() => run(toggleInspector)}
@@ -213,7 +361,11 @@ export function AppMenuBar() {
             onClick={() =>
               run(() => {
                 setSidebarOpen(true);
+                setLeftPanelOpen(true);
                 setInspectorOpen(true);
+                setSidebarWidth(SIDEBAR_WIDTH.default);
+                setLeftPanelWidth(LEFT_PANEL_WIDTH.default);
+                setInspectorWidth(INSPECTOR_WIDTH.default);
               })
             }
           />
@@ -234,11 +386,14 @@ export function AppMenuBar() {
             onClick={() => run(() => router.push("/"))}
           />
           <MenuItem
+            label="Detection & ML reference"
+            onClick={() => run(() => router.push("/docs"))}
+          />
+          <MenuItem
             label="Sign out"
             onClick={() =>
               run(() => {
-                signOut();
-                router.replace("/");
+                void signOut().then(() => router.replace("/"));
               })
             }
           />
@@ -254,7 +409,7 @@ export function AppMenuBar() {
       role="menubar"
     >
       <Link
-        href="/projects"
+        href={inStudio ? "/studio" : "/projects"}
         className="mr-2 px-2 font-display text-xs font-semibold text-brand-700 hover:text-brand-800"
       >
         HighLife

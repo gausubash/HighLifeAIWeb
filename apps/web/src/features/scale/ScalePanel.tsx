@@ -1,19 +1,30 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   A_PAPER_SIZES_MM,
+  canonicalScaleText,
   formatMeasuredLength,
   lengthFromPixels,
+  parsePaperFromText,
+  parseScaleAndPaper,
+  parseScaleRatio,
   pixelDistance,
   pixelsPerMeterFromScaleAndPaper,
   type PointPx,
   type ScaleInfo,
 } from "@/lib/scale/parseScale";
+import { scaleNeedsCalibration, shouldApplyOcrScale } from "@/lib/scale/layoutRegionCrop";
 import { formatConfidence } from "@/lib/utils";
 import { pdfGraphicsLabel, type PdfGraphicsKind } from "@/lib/pdf/classifyPdfGraphics";
 
 export type ScaleToolMode = "none" | "calibrate" | "declaration" | "measure";
+
+export interface OcrLineItem {
+  text?: string | null;
+  confidence?: number;
+  bbox?: [number, number][] | null;
+}
 
 interface ScalePanelProps {
   scaleInfo: ScaleInfo;
@@ -25,6 +36,24 @@ interface ScalePanelProps {
   renderHeightPx?: number;
   graphicsKind?: PdfGraphicsKind;
   graphicsSummary?: string;
+  ocrScaleText?: string | null;
+  ocrLines?: OcrLineItem[] | null;
+  scaleOcrBusy?: boolean;
+  scaleOcrStatus?: string | null;
+  scaleOcrProgress?: {
+    current: number;
+    total: number;
+    pageNumber: number;
+    phase: "prepare" | "ocr" | "save";
+  } | null;
+  scaleOcrNotice?: string | null;
+  scaleOcrError?: string | null;
+  titleBlockRegionSet?: boolean;
+  autoScaleOcr?: boolean;
+  onAutoScaleOcrChange?: (checked: boolean) => void;
+  onApplyOcrScale?: () => void;
+  onRunTitleBlockOcr?: () => void;
+  onCancelScaleOcr?: () => void;
   onStartCalibrate?: () => void;
   onStartDeclaration?: () => void;
   onStartMeasure?: () => void;
@@ -38,7 +67,10 @@ interface ScalePanelProps {
 }
 
 const METHOD_LABELS: Record<string, string> = {
-  title_block_text: "Title block text",
+  title_block_text: "Auto detect scale (OCR)",
+  auto_detect_scale: "Auto detect scale (OCR)",
+  ocr: "Auto detect scale (OCR)",
+  paddleocr: "Auto detect scale (OCR)",
   paper_size_auto: "Paper size (1:1)",
   scale_bar_graphic: "Graphic scale bar",
   manual_two_point: "Two-point measure",
@@ -54,6 +86,21 @@ function defaultPaper(scaleInfo: ScaleInfo): string {
   return "A3";
 }
 
+function scaleOcrProgressPercent(progress: {
+  current: number;
+  total: number;
+  pageNumber: number;
+  phase: "prepare" | "ocr" | "save";
+}): number {
+  const phaseWeight =
+    progress.phase === "prepare" ? 0.15 : progress.phase === "ocr" ? 0.55 : 0.95;
+  const fraction =
+    progress.pageNumber > 0
+      ? (progress.current - 1 + phaseWeight) / progress.total
+      : 0.05;
+  return Math.min(100, Math.round(100 * fraction));
+}
+
 export function ScalePanel({
   scaleInfo,
   fileName,
@@ -64,6 +111,19 @@ export function ScalePanel({
   renderHeightPx,
   graphicsKind,
   graphicsSummary,
+  ocrScaleText,
+  ocrLines,
+  scaleOcrBusy,
+  scaleOcrStatus,
+  scaleOcrProgress,
+  scaleOcrNotice,
+  scaleOcrError,
+  titleBlockRegionSet,
+  autoScaleOcr,
+  onAutoScaleOcrChange,
+  onApplyOcrScale,
+  onRunTitleBlockOcr,
+  onCancelScaleOcr,
   onStartCalibrate,
   onStartDeclaration,
   onStartMeasure,
@@ -72,15 +132,54 @@ export function ScalePanel({
   onApplyCalibration,
   onApplyDeclaration,
 }: ScalePanelProps) {
+  const needsCalibration = scaleNeedsCalibration(scaleInfo);
+  const canApplyOcrScale = shouldApplyOcrScale(scaleInfo);
   const hasScale = scaleInfo.scaleRatio != null || scaleInfo.pixelsPerMeter != null;
   const canMeasure =
     scaleInfo.pixelsPerMeter != null && scaleInfo.pixelsPerMeter > 0;
   const [realLength, setRealLength] = useState("");
   const [realUnit, setRealUnit] = useState<"m" | "mm">("m");
+  const [showAllOcrLines, setShowAllOcrLines] = useState(false);
   const [scaleRatioInput, setScaleRatioInput] = useState(
     String(scaleInfo.scaleRatio ?? 200),
   );
   const [paperInput, setPaperInput] = useState(defaultPaper(scaleInfo));
+
+  const effectiveOcrScaleText = useMemo(() => {
+    if (ocrScaleText?.trim()) return ocrScaleText.trim();
+    if (ocrLines && ocrLines.length > 0) {
+      return canonicalScaleText(null, null, ocrLines);
+    }
+    return null;
+  }, [ocrScaleText, ocrLines]);
+
+  useEffect(() => {
+    if (scaleInfo.scaleRatio != null) {
+      setScaleRatioInput(String(scaleInfo.scaleRatio));
+    }
+    if (scaleInfo.paper && scaleInfo.paper in A_PAPER_SIZES_MM) {
+      setPaperInput(scaleInfo.paper);
+    }
+  }, [scaleInfo.scaleRatio, scaleInfo.paper]);
+
+  useEffect(() => {
+    if (!effectiveOcrScaleText) return;
+    const decl = parseScaleAndPaper(effectiveOcrScaleText);
+    if (decl) {
+      setScaleRatioInput(String(decl.scale));
+      setPaperInput(decl.paper);
+      return;
+    }
+    const ratio = parseScaleRatio(effectiveOcrScaleText);
+    if (ratio) {
+      setScaleRatioInput(String(ratio));
+    }
+  }, [effectiveOcrScaleText]);
+
+  const ocrScaleParsable = useMemo(() => {
+    if (!effectiveOcrScaleText) return false;
+    return Boolean(parseScaleAndPaper(effectiveOcrScaleText) ?? parseScaleRatio(effectiveOcrScaleText));
+  }, [effectiveOcrScaleText]);
 
   const distPx =
     measurePoints.length >= 2
@@ -135,6 +234,169 @@ export function ScalePanel({
         </p>
       )}
 
+      {(onRunTitleBlockOcr || effectiveOcrScaleText != null || (ocrLines && ocrLines.length > 0)) && (
+        <div className="space-y-2.5 rounded border border-teal-200 bg-teal-50/50 p-3">
+          <div className="flex items-center justify-between">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-teal-800">
+              Auto detect scale (OCR)
+            </p>
+            {effectiveOcrScaleText ? (
+              <span className="rounded bg-teal-100 px-1.5 py-0.5 text-[10px] font-semibold text-teal-800">
+                Parsed
+              </span>
+            ) : null}
+          </div>
+
+          {effectiveOcrScaleText ? (
+            <div className="flex items-center justify-between gap-2 rounded border border-teal-200 bg-white px-2.5 py-2">
+              <div>
+                <p className="text-[9px] font-semibold uppercase tracking-wide text-slate-500">
+                  Detected Scale
+                </p>
+                <span className="font-mono text-sm font-bold text-teal-950">
+                  {effectiveOcrScaleText}
+                </span>
+              </div>
+              {onApplyOcrScale && ocrScaleParsable && canApplyOcrScale ? (
+                <button
+                  type="button"
+                  className="rounded bg-teal-700 px-2.5 py-1 text-xs font-semibold text-white hover:bg-teal-800 shadow-sm disabled:opacity-50"
+                  disabled={scaleOcrBusy}
+                  onClick={onApplyOcrScale}
+                >
+                  Apply to drawing
+                </button>
+              ) : null}
+            </div>
+          ) : (
+            <p className="text-xs leading-relaxed text-slate-600">
+              {titleBlockRegionSet
+                ? "Click auto detect scale to read drawing ratio and update px/m."
+                : "Reads scale ratio and paper from title block (or draws region on Layout tab)."}
+            </p>
+          )}
+
+          {/* Detected text lines from title block OCR */}
+          {ocrLines && ocrLines.length > 0 && (
+            <div className="space-y-1.5 rounded border border-teal-200/80 bg-white p-2 text-xs">
+              <div className="flex items-center justify-between text-[10px] font-semibold uppercase tracking-wide text-teal-900">
+                <span>Title block text ({ocrLines.length} line{ocrLines.length === 1 ? "" : "s"})</span>
+                {ocrLines.length > 4 && (
+                  <button
+                    type="button"
+                    onClick={() => setShowAllOcrLines(!showAllOcrLines)}
+                    className="font-normal text-[10px] text-teal-700 hover:underline"
+                  >
+                    {showAllOcrLines ? "Show less" : `Show all (${ocrLines.length})`}
+                  </button>
+                )}
+              </div>
+              <ul className="max-h-48 overflow-y-auto space-y-1 font-mono text-[11px] text-slate-800 divide-y divide-slate-100">
+                {(showAllOcrLines ? ocrLines : ocrLines.slice(0, 4)).map((line, idx) => {
+                  const rawText = (line.text ?? "").trim();
+                  const isScaleCandidate =
+                    Boolean(parseScaleAndPaper(rawText)) ||
+                    Boolean(parseScaleRatio(rawText)) ||
+                    Boolean(parsePaperFromText(rawText));
+                  return (
+                    <li
+                      key={idx}
+                      className={`flex items-start justify-between gap-1.5 pt-1 first:pt-0 ${
+                        isScaleCandidate ? "bg-teal-50/70 -mx-1 px-1 rounded font-medium" : ""
+                      }`}
+                      title={line.confidence != null ? `Confidence: ${Math.round(line.confidence * 100)}%` : undefined}
+                    >
+                      <span className="select-none text-[10px] text-slate-400 shrink-0">
+                        {idx + 1}.
+                      </span>
+                      <span className={`flex-1 select-text break-words ${isScaleCandidate ? "text-teal-950 font-semibold" : "text-slate-800"}`}>
+                        {rawText || "(empty line)"}
+                      </span>
+                      {line.confidence != null && (
+                        <span className="shrink-0 text-[9px] text-slate-400 ml-1">
+                          {Math.round(line.confidence * 100)}%
+                        </span>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
+
+          {onAutoScaleOcrChange ? (
+            <label className="flex items-start gap-2 text-[11px] leading-snug text-slate-600">
+              <input
+                type="checkbox"
+                className="mt-0.5"
+                checked={autoScaleOcr ?? false}
+                disabled={scaleOcrBusy}
+                onChange={(e) => onAutoScaleOcrChange(e.target.checked)}
+              />
+              <span>
+                Auto-detect scale from title block OCR when not calibrated
+              </span>
+            </label>
+          ) : null}
+
+          <div className="flex flex-wrap gap-2">
+            {onRunTitleBlockOcr ? (
+              <button
+                type="button"
+                className="flex-1 rounded bg-teal-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-teal-800 disabled:opacity-50"
+                disabled={scaleOcrBusy}
+                onClick={onRunTitleBlockOcr}
+              >
+                {scaleOcrBusy ? scaleOcrStatus ?? "Auto-detecting scale…" : "Auto detect scale"}
+              </button>
+            ) : null}
+            {onApplyOcrScale && effectiveOcrScaleText && ocrScaleParsable && canApplyOcrScale ? (
+              <button
+                type="button"
+                className="rounded border border-brand-300 px-3 py-1.5 text-xs font-medium text-brand-800 hover:bg-brand-50 disabled:opacity-50"
+                disabled={scaleOcrBusy}
+                onClick={onApplyOcrScale}
+              >
+                Apply OCR scale
+              </button>
+            ) : null}
+            {scaleOcrBusy && onCancelScaleOcr ? (
+              <button
+                type="button"
+                className="rounded border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                onClick={onCancelScaleOcr}
+              >
+                Cancel
+              </button>
+            ) : null}
+          </div>
+          {scaleOcrBusy && scaleOcrProgress && scaleOcrProgress.total > 0 ? (
+            <div className="space-y-1">
+              <div className="h-1.5 overflow-hidden rounded-full bg-slate-200">
+                <div
+                  className="h-full rounded-full bg-teal-600 transition-all"
+                  style={{ width: `${scaleOcrProgressPercent(scaleOcrProgress)}%` }}
+                />
+              </div>
+              {scaleOcrStatus ? (
+                <p className="text-[11px] leading-relaxed text-slate-600">{scaleOcrStatus}</p>
+              ) : null}
+            </div>
+          ) : null}
+          {scaleOcrNotice ? (
+            <p className="text-[11px] leading-relaxed text-emerald-700">{scaleOcrNotice}</p>
+          ) : null}
+          {scaleOcrError ? (
+            <p className="text-[11px] leading-relaxed text-red-600">{scaleOcrError}</p>
+          ) : null}
+          {effectiveOcrScaleText && !ocrScaleParsable ? (
+            <p className="text-[11px] leading-relaxed text-amber-700">
+              OCR text could not be parsed as 1:N @ paper — enter scale manually.
+            </p>
+          ) : null}
+        </div>
+      )}
+
       {(onStartCalibrate || onStartMeasure || onStartDeclaration) && (
         <div className="space-y-2 rounded border border-slate-200 bg-slate-50 p-3">
           <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
@@ -144,10 +406,19 @@ export function ScalePanel({
           {toolMode === "none" && (
             <>
               <p className="text-xs leading-relaxed text-slate-600">
-                Enter 1:N and paper size, or click a known length. Then measure
-                to verify.
+                Detect scale automatically with OCR, enter 1:N and paper size, or calibrate from two points.
               </p>
               <div className="flex flex-col gap-2">
+                {onRunTitleBlockOcr && (
+                  <button
+                    type="button"
+                    className="flex items-center justify-center gap-1.5 rounded bg-teal-700 px-3 py-2 text-xs font-semibold text-white hover:bg-teal-800 disabled:opacity-50"
+                    disabled={scaleOcrBusy}
+                    onClick={onRunTitleBlockOcr}
+                  >
+                    <span>{scaleOcrBusy ? scaleOcrStatus ?? "Auto-detecting scale…" : "Auto detect scale (OCR)"}</span>
+                  </button>
+                )}
                 {onStartDeclaration && (
                   <button
                     type="button"

@@ -1,12 +1,17 @@
-"""Roboflow Universe inference for crop-stage floor-plan classes.
+"""Roboflow floorplan-iculh wall/door segmentation.
 
-Universe hosted models (e.g. floor-r1kta/floorplan-iculh) are not downloadable
-.pt files. They run via detect.roboflow.com with ROBOFLOW_API_KEY.
+Prefer on-device ONNX weights (cached under models/roboflow_cache/). Fall back to
+detect.roboflow.com when local weights are missing and ROBOFLOW_API_KEY is set.
+
+Prefetch once (Python 3.10–3.12 + inference package):
+
+  .venv-tf\\Scripts\\python.exe scripts/prefetch_roboflow.py
 """
 
 from __future__ import annotations
 
 from io import BytesIO
+from pathlib import Path
 from uuid import uuid4
 
 import httpx
@@ -19,10 +24,46 @@ from app.yolo.classes import display_label, entity_type_for, room_type_for
 DEFAULT_MODEL_ID = "floorplan-iculh/1"
 DETECT_BASE = "https://detect.roboflow.com"
 
+_local_model = None
+_local_model_path: str | None = None
+
+
+def default_roboflow_cache_dir() -> Path:
+    return Path(__file__).resolve().parents[2] / "models" / "roboflow_cache"
+
+
+def resolve_roboflow_weights(settings: Settings | None = None) -> Path | None:
+    """Return local ONNX/PT path when available."""
+    settings = settings or get_settings()
+    override = (getattr(settings, "roboflow_weights", None) or "").strip()
+    if override:
+        path = Path(override)
+        return path if path.is_file() else None
+    model_id = (settings.roboflow_model_id or DEFAULT_MODEL_ID).strip().strip("/")
+    parts = [p for p in model_id.split("/") if p]
+    if len(parts) >= 2:
+        project, version = parts[-2], parts[-1]
+    else:
+        project, version = "floorplan-iculh", "1"
+    cached = default_roboflow_cache_dir() / project / version / "weights.onnx"
+    if cached.is_file():
+        return cached
+    alt = Path(__file__).resolve().parents[2] / "models" / "roboflow_floorplan_iculh.onnx"
+    return alt if alt.is_file() else None
+
+
+def roboflow_local_ready(settings: Settings | None = None) -> bool:
+    return resolve_roboflow_weights(settings) is not None
+
+
+def roboflow_cloud_ready(settings: Settings | None = None) -> bool:
+    settings = settings or get_settings()
+    return bool(settings.roboflow_api_key.strip() and settings.roboflow_model_id.strip())
+
 
 def roboflow_ready(settings: Settings | None = None) -> bool:
     settings = settings or get_settings()
-    return bool(settings.roboflow_api_key.strip() and settings.roboflow_model_id.strip())
+    return roboflow_local_ready(settings) or roboflow_cloud_ready(settings)
 
 
 def _bbox(poly: list[tuple[float, float]]) -> tuple[float, float, float, float]:
@@ -95,7 +136,47 @@ def is_wall_region(region) -> bool:
     return key in {"wall", "walls", "partition", "external wall", "interior wall"}
 
 
-def detect_roboflow_regions(
+def _get_local_model(weights: Path):
+    global _local_model, _local_model_path
+    key = str(weights.resolve())
+    if _local_model is None or _local_model_path != key:
+        from ultralytics import YOLO
+
+        _local_model = YOLO(key, task="segment")
+        _local_model_path = key
+    return _local_model
+
+
+def detect_roboflow_local(
+    rgb: np.ndarray,
+    *,
+    settings: Settings | None = None,
+):
+    settings = settings or get_settings()
+    weights = resolve_roboflow_weights(settings)
+    if weights is None:
+        raise FileNotFoundError(
+            "Local Roboflow weights missing. Run: "
+            ".venv-tf\\Scripts\\python.exe scripts/prefetch_roboflow.py"
+        )
+    from app.yolo.predict import regions_from_ultralytics
+
+    model = _get_local_model(weights)
+    device = (settings.device.value if hasattr(settings.device, "value") else str(settings.device)) or "cpu"
+    imgsz = 640
+    conf = float(settings.roboflow_conf or 0.25)
+    preds = model.predict(source=rgb, imgsz=imgsz, conf=conf, device=device, verbose=False)
+    result = preds[0] if preds else None
+    if result is None:
+        return []
+    src_h, src_w = rgb.shape[:2]
+    regions = regions_from_ultralytics(result, src_w=src_w, src_h=src_h, target_w=src_w, target_h=src_h)
+    for region in regions:
+        region.attributes["source"] = "roboflow-local"
+    return regions
+
+
+def detect_roboflow_cloud(
     rgb: np.ndarray,
     *,
     settings: Settings | None = None,
@@ -122,3 +203,15 @@ def detect_roboflow_regions(
     if not isinstance(predictions, list):
         return []
     return predictions_to_regions(predictions)
+
+
+def detect_roboflow_regions(
+    rgb: np.ndarray,
+    *,
+    settings: Settings | None = None,
+):
+    """Prefer local ONNX; fall back to hosted Roboflow API."""
+    settings = settings or get_settings()
+    if roboflow_local_ready(settings):
+        return detect_roboflow_local(rgb, settings=settings)
+    return detect_roboflow_cloud(rgb, settings=settings)

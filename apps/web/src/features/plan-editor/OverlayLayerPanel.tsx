@@ -2,9 +2,17 @@
 
 import { useMemo } from "react";
 import { classSwatch } from "./styles";
+import { isLayoutEntity } from "./layoutRegionClasses";
 import { useActiveOverlayPage, useOverlayStore } from "./useOverlayStore";
 
-export function OverlayLayerPanel() {
+export function OverlayLayerPanel({
+  sourceFilter = "all",
+  excludeLayout = true,
+}: {
+  sourceFilter?: "model" | "all";
+  /** Exclude sheet layout regions (title block, drawing area, etc.) from detections list. */
+  excludeLayout?: boolean;
+}) {
   const { entities } = useActiveOverlayPage();
   const hiddenLabels = useOverlayStore((s) => s.hiddenLabels);
   const toggleLabelVisibility = useOverlayStore((s) => s.toggleLabelVisibility);
@@ -12,19 +20,21 @@ export function OverlayLayerPanel() {
   const rows = useMemo(() => {
     const counts = new Map<string, number>();
     for (const entity of entities) {
+      if (sourceFilter === "model" && entity.source !== "model") continue;
+      if (excludeLayout && isLayoutEntity(entity)) continue;
       const label = entity.label || entity.type;
       counts.set(label, (counts.get(label) ?? 0) + 1);
     }
     return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
-  }, [entities]);
+  }, [entities, sourceFilter, excludeLayout]);
 
   return (
     <div className="space-y-2">
       <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Detections</h3>
       {rows.length === 0 ? (
         <p className="text-xs leading-relaxed text-slate-500">
-          No regions on this page yet. Run <span className="font-medium text-slate-700">Detect regions</span>{" "}
-          above to overlay walls and fixtures.
+          No detections on this page. Run <span className="font-medium text-slate-700">Detect regions</span>{" "}
+          to overlay walls and fixtures. Training labels stay in Model Studio.
         </p>
       ) : (
         <ul className="space-y-0.5">

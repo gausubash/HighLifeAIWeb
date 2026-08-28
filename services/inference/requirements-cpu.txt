@@ -3,3 +3,13 @@
 ultralytics>=8.3.0
 opencv-python-headless>=4.10.0
 segmentation-models-pytorch>=0.5.0
+mmengine>=0.10.0
+# Optional: floorData DeepLabV3+ / UNet (.h5) — use a separate Python 3.10–3.12 venv:
+#   py -3.11 -m venv .venv-tf
+#   .venv-tf\Scripts\python.exe -m pip install -r requirements-tensorflow.txt
+# Studio trains floorData via that interpreter (TENSORFLOW_PYTHON / .venv-tf).
+
+# Roboflow local ONNX (after scripts/prefetch_roboflow.py)
+onnx>=1.16.0
+onnxruntime>=1.19.0
+

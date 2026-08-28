@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import type { Analysis } from "@highlife/shared-types";
-import { projectStore } from "@/lib/mock/store";
+import { projectStore } from "@/lib/data/projectStore";
 import { mockAnalysisResult } from "@/lib/mock/result";
 import { nextStage, stageProgress } from "@/lib/mock/stages";
 
@@ -41,13 +41,12 @@ export function useAnalysisProgress({
     }
 
     if (analysis.status === "queued") {
-      projectStore.updateAnalysis(analysisId, {
+      void projectStore.updateAnalysis(analysisId, {
         status: "processing",
         currentStage: "rendering_pdf",
         progress: stageProgress("rendering_pdf"),
         startedAt: new Date().toISOString(),
-      });
-      refresh();
+      }).then(refresh);
       return;
     }
 
@@ -62,7 +61,7 @@ export function useAnalysisProgress({
         const reviewCount =
           existingResult?.reviewWarnings.length ?? mockAnalysisResult.reviewWarnings.length;
 
-        projectStore.updateAnalysis(analysisId, {
+        void projectStore.updateAnalysis(analysisId, {
           status: "review_required",
           currentStage: "review_required",
           progress: 100,
@@ -70,26 +69,24 @@ export function useAnalysisProgress({
           unitCount,
           reviewCount,
           completedAt: new Date().toISOString(),
+        }).then(() => {
+          if (!existingResult) {
+            void projectStore.setResult(analysisId, {
+              ...mockAnalysisResult,
+              analysisId,
+            }).then(refresh);
+            return;
+          }
+          refresh();
         });
-
-        // If the upload step already created a result (e.g. with a rendered PDF page image),
-        // don't overwrite it. Phase 2 can set the result early during upload.
-        if (!existingResult) {
-          projectStore.setResult(analysisId, {
-            ...mockAnalysisResult,
-            analysisId,
-          });
-        }
-        refresh();
         window.clearInterval(timer);
         return;
       }
 
-      projectStore.updateAnalysis(analysisId, {
+      void projectStore.updateAnalysis(analysisId, {
         currentStage: upcoming,
         progress: stageProgress(upcoming),
-      });
-      refresh();
+      }).then(refresh);
     }, STAGE_INTERVAL_MS);
 
     return () => window.clearInterval(timer);

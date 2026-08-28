@@ -6,6 +6,8 @@ import {
   inferPaperSizeFromPoints,
   parseScaleAndPaper,
   parseScaleRatio,
+  parsePaperFromText,
+  canonicalScaleText,
   pixelDistance,
   pixelsPerMeterFromScaleAndPaper,
 } from "@/lib/scale/parseScale";
@@ -23,17 +25,116 @@ describe("parseScaleAndPaper", () => {
     expect(parseScaleAndPaper("1:200@A3")).toEqual({ scale: 200, paper: "A3" });
   });
 
-  it("tolerates OCR noise", () => {
+  it("tolerates OCR noise and format variations with @", () => {
     expect(parseScaleAndPaper("SCALE l:200 @ A3")).toEqual({ scale: 200, paper: "A3" });
     expect(parseScaleAndPaper("Scale 1.200 @ A 3")).toEqual({ scale: 200, paper: "A3" });
     expect(parseScaleAndPaper("SCALE 1:200 @ A3J")).toEqual({ scale: 200, paper: "A3" });
+    expect(parseScaleAndPaper("SCALE: 1:100 @ A1")).toEqual({ scale: 100, paper: "A1" });
+    expect(parseScaleAndPaper("1:100 @ A1")).toEqual({ scale: 100, paper: "A1" });
+    expect(parseScaleAndPaper("SCALE 1:10O @ A1")).toEqual({ scale: 100, paper: "A1" });
+    expect(parseScaleAndPaper("SCALE 1:5O @ A1")).toEqual({ scale: 50, paper: "A1" });
   });
 });
 
 describe("parseScaleRatio", () => {
-  it("parses bare scale ratios", () => {
+  it("parses scale ratios in 1:N format", () => {
     expect(parseScaleRatio("DRAWING SCALE 1:100")).toBe(100);
     expect(parseScaleRatio("Scale l:200")).toBe(200);
+    expect(parseScaleRatio("SCALE 1:10O")).toBe(100);
+    expect(parseScaleRatio("SCALE 1 : 100")).toBe(100);
+    expect(parseScaleRatio("SCALE: 1/100")).toBe(100);
+    expect(parseScaleRatio("1 TO 100")).toBe(100);
+  });
+});
+
+describe("parsePaperFromText", () => {
+  it("parses paper codes preceded by @", () => {
+    expect(parsePaperFromText("@ A1")).toBe("A1");
+    expect(parsePaperFromText("DRAWN @ A3")).toBe("A3");
+    expect(parsePaperFromText("@A1")).toBe("A1");
+    expect(parsePaperFromText("© A2")).toBe("A2");
+    expect(parsePaperFromText("@ ISO A1")).toBe("A1");
+  });
+
+  it("returns null when paper code is not preceded by @", () => {
+    expect(parsePaperFromText("PROJECT A1")).toBeNull();
+    expect(parsePaperFromText("A2")).toBeNull();
+    expect(parsePaperFromText("LEVEL A3")).toBeNull();
+  });
+});
+
+describe("canonicalScaleText", () => {
+  it("merges ratio and paper from close separate OCR lines", () => {
+    expect(
+      canonicalScaleText(null, null, [
+        { text: "ABC ARCHITECTS" },
+        { text: "GROUND FLOOR PLAN" },
+        { text: "SCALE 1:100" },
+        { text: "@ A1" },
+        { text: "DATE 2026-08-28" },
+        { text: "PROJECT 1024" },
+      ]),
+    ).toBe("1:100 @ A1");
+
+    expect(
+      canonicalScaleText(null, null, [
+        { text: "1:200" },
+        { text: "FLOOR PLAN" },
+        { text: "@ A3" },
+      ]),
+    ).toBe("1:200 @ A3");
+  });
+
+  it("does not pair paper if too far from scale ratio", () => {
+    expect(
+      canonicalScaleText(null, null, [
+        { text: "SCALE 1:100" },
+        { text: "LINE 1" },
+        { text: "LINE 2" },
+        { text: "LINE 3" },
+        { text: "@ A1" },
+      ]),
+    ).toBe("1:100");
+  });
+
+  it("clusters SCALE, 1:100 and @ A1 by box position even when list order is far apart", () => {
+    const box = (x: number, y: number, w = 40, h = 12): [number, number][] => [
+      [x, y],
+      [x + w, y],
+      [x + w, y + h],
+      [x, y + h],
+    ];
+    expect(
+      canonicalScaleText(null, null, [
+        { text: "SCALE", bbox: box(800, 900) },
+        { text: "FIRST FLOOR PLAN", bbox: box(40, 40, 180, 16) },
+        { text: "STORE", bbox: box(120, 300) },
+        { text: "BED 1", bbox: box(200, 300) },
+        { text: "1:100", bbox: box(850, 900) },
+        { text: "ROBE", bbox: box(280, 300) },
+        { text: "@ A1", bbox: box(910, 900) },
+      ]),
+    ).toBe("1:100 @ A1");
+  });
+
+  it("does not pair a spatially distant paper even if it is list-adjacent", () => {
+    const box = (x: number, y: number, w = 40, h = 12): [number, number][] => [
+      [x, y],
+      [x + w, y],
+      [x + w, y + h],
+      [x, y + h],
+    ];
+    expect(
+      canonicalScaleText(null, null, [
+        { text: "SCALE", bbox: box(800, 900) },
+        { text: "1:100", bbox: box(850, 900) },
+        { text: "@ A3", bbox: box(40, 40) },
+      ]),
+    ).toBe("1:100");
+  });
+
+  it("keeps full declaration when already present", () => {
+    expect(canonicalScaleText("SCALE 1:200 @ A3", "A3")).toBe("1:200 @ A3");
   });
 });
 

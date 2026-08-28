@@ -3,15 +3,20 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { projectStore } from "@/lib/mock/store";
+import { projectStore } from "@/lib/data/projectStore";
 import { useLayoutStore } from "@/features/plan-viewer/useLayoutStore";
 
 function buildBreadcrumbs(
   pathname: string
 ): { label: string; href?: string }[] {
-  const crumbs: { label: string; href?: string }[] = [
-    { label: "Projects", href: "/projects" },
-  ];
+  const crumbs: { label: string; href?: string }[] = [];
+  if (pathname.startsWith("/studio")) {
+    return [{ label: "Model Studio", href: "/studio" }];
+  }
+  if (pathname.startsWith("/docs")) {
+    return [{ label: "Detection & ML reference", href: "/docs" }];
+  }
+  crumbs.push({ label: "Projects", href: "/projects" });
 
   const projectMatch = pathname.match(/^\/projects\/([^/]+)/);
   if (!projectMatch) return crumbs;

@@ -37,6 +37,10 @@ export function createPageOnlyResult(args: {
     scaleConfidence: scaleInfo.confidence,
     graphicsKind: p.graphicsKind,
     graphicsSummary: p.graphicsSummary,
+    sourceFileName: fileName,
+    levelName: `Floor ${p.pageNumber}`,
+    levelIndex: p.pageNumber - 1,
+    floorId: `floor-page-${String(p.pageNumber).padStart(3, "0")}`,
   }));
 
   return {

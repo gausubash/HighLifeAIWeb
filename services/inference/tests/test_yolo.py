@@ -12,8 +12,8 @@ import pytest
 
 from app.config import Settings
 from app.yolo.classes import CLASS_TO_ID, canonical_label, display_label, entity_type_for
-from app.yolo.convert_labelme import convert_labelme_dir
-from app.yolo.predict import layout_enabled, regions_from_ultralytics, yolo_ready
+from app.yolo.convert_labelme import convert_labelme_dir, looks_like_labelme
+from app.yolo.predict import detect_page_regions, layout_enabled, regions_from_ultralytics, yolo_ready
 
 
 def _png_b64(width: int = 8, height: int = 6) -> str:
@@ -27,6 +27,32 @@ def test_canonical_label_aliases() -> None:
     assert canonical_label("Toilet") == "Bathroom"
     assert canonical_label("Dining Table") is None
     assert CLASS_TO_ID["Bedroom"] == 2
+
+
+def test_looks_like_labelme_when_image_path_after_large_shapes(tmp_path: Path) -> None:
+    """imagePath/imageData sit after shapes[]; head-only sniff used to miss them."""
+    shapes = [
+        {
+            "label": "Bedroom",
+            "shape_type": "polygon",
+            "points": [[1, 1], [6, 1], [6, 5], [1, 5]],
+            "description": "x" * 80,
+        }
+        for _ in range(80)
+    ]
+    payload = {
+        "version": "5.8.3",
+        "flags": {},
+        "shapes": shapes,
+        "imagePath": "page.png",
+        "imageData": None,
+        "imageWidth": 8,
+        "imageHeight": 6,
+    }
+    path = tmp_path / "big.json"
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    assert path.stat().st_size > 4096
+    assert looks_like_labelme(path)
 
 
 def test_convert_labelme_writes_yolo_seg(tmp_path: Path) -> None:
@@ -61,13 +87,39 @@ def test_convert_labelme_writes_yolo_seg(tmp_path: Path) -> None:
     stats = convert_labelme_dir(src, out, fold="fold_1", dataset_yaml=dataset_yaml)
     assert stats.images == 1
     assert stats.train == 1
-    assert stats.val == 0
+    # Empty val is filled by mirroring one train sample (Ultralytics requires val images).
+    assert stats.val == 1
     assert stats.instances == 1
     assert stats.skipped_labels["Dining Table"] == 1
     label_txt = (out / "labels" / "train" / "21_1.txt").read_text(encoding="utf-8").strip()
     assert label_txt.startswith("2 ")
     assert (out / "images" / "train" / "21_1.png").is_file()
+    assert (out / "images" / "val" / "21_1.png").is_file()
     assert (out / "data.yaml").is_file()
+
+
+def test_convert_labelme_single_page_random_split_fills_val(tmp_path: Path) -> None:
+    src = tmp_path / "labelme"
+    src.mkdir()
+    payload = {
+        "shapes": [
+            {
+                "label": "Bedroom",
+                "shape_type": "polygon",
+                "points": [[1, 1], [6, 1], [6, 5], [1, 5]],
+            }
+        ],
+        "imagePath": "20_1.png",
+        "imageData": _png_b64(),
+        "imageWidth": 8,
+        "imageHeight": 6,
+    }
+    (src / "20_1.json").write_text(json.dumps(payload), encoding="utf-8")
+    out = tmp_path / "yolo"
+    stats = convert_labelme_dir(src, out, fold=None, task="segment")
+    assert stats.train == 1
+    assert stats.val == 1
+    assert (out / "images" / "val" / "20_1.png").is_file()
 
 
 class _Arr:
@@ -139,8 +191,13 @@ def test_yolo_ready_remote_url(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_yolo_ready_missing_local(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("YOLO_WEIGHTS", str(tmp_path / "missing.pt"))
+    monkeypatch.setattr(
+        "app.yolo.predict.default_weights_path",
+        lambda: tmp_path / "missing_cache.pt",
+    )
     settings = Settings(_env_file=None)
-    assert yolo_ready(settings) is False
+    # Falls back to the public Hugging Face layout weights URL.
+    assert yolo_ready(settings) is True
 
 
 def test_layout_disabled_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -165,6 +222,45 @@ class _LayoutResult:
     names = {0: "drawing_area", 1: "legend_block", 2: "title_block"}
     boxes = _LayoutBoxes()
     masks = None
+
+
+def test_layout_only_detects_whole_page_not_tiles(monkeypatch: pytest.MonkeyPatch) -> None:
+    tiled_calls = {"n": 0}
+    predict_calls: list[tuple[int, int]] = []
+
+    def fake_maybe_tiled(rgb, **kwargs) -> list:
+        tiled_calls["n"] += 1
+        return []
+
+    def fake_predict_regions(model, crop_rgb, **kwargs) -> list:
+        predict_calls.append(crop_rgb.shape[:2])
+        return regions_from_ultralytics(
+            _LayoutResult(),
+            src_w=crop_rgb.shape[1],
+            src_h=crop_rgb.shape[0],
+            target_w=crop_rgb.shape[1],
+            target_h=crop_rgb.shape[0],
+        )
+
+    monkeypatch.setattr("app.yolo.tiling.maybe_tiled_detect", fake_maybe_tiled)
+    monkeypatch.setattr("app.yolo.predict._predict_regions", fake_predict_regions)
+    monkeypatch.setattr("app.yolo.predict.get_yolo_model", lambda _s: object())
+    monkeypatch.setattr(
+        "app.yolo.predict._load_rgb",
+        lambda _b: np.zeros((2400, 3200, 3), dtype=np.uint8),
+    )
+
+    settings = Settings(
+        USE_LAYOUT_DETECTOR=True,
+        layout_only=True,
+        YOLO_WEIGHTS="models/yolo_layout.pt",
+    )
+    result = detect_page_regions(b"png", settings=settings)
+
+    assert tiled_calls["n"] == 0
+    assert predict_calls == [(2400, 3200)]
+    assert len(result.regions) == 2
+    assert result.model_id == "yolo11x-blueprint-layout-detector"
 
 
 def test_regions_from_ultralytics_layout_boxes() -> None:

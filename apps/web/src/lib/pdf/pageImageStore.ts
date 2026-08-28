@@ -1,8 +1,8 @@
 "use client";
 
 /**
- * PDF page images are too large for localStorage (especially at 300 DPI).
- * Store PNG blobs in IndexedDB; project metadata stays in localStorage.
+ * PDF page images are too large for Postgres JSON. Cache PNG blobs in IndexedDB
+ * and fall back to private Supabase Storage (`sb:plans/...`) when the cache misses.
  */
 
 const DB_NAME = "highlife-page-images";
@@ -43,13 +43,12 @@ export function pageImageRef(analysisId: string, pageNumber: number): string {
   return `idb:${pageKey(analysisId, pageNumber)}`;
 }
 
-export async function putPageImage(
+export async function putPageImageBlob(
   analysisId: string,
   pageNumber: number,
-  dataUrl: string,
+  blob: Blob,
 ): Promise<string> {
   const db = await openDb();
-  const blob = dataUrlToBlob(dataUrl);
   await new Promise<void>((resolve, reject) => {
     const tx = db.transaction(STORE, "readwrite");
     tx.oncomplete = () => resolve();
@@ -60,10 +59,18 @@ export async function putPageImage(
   return pageImageRef(analysisId, pageNumber);
 }
 
-export async function getPageImageObjectUrl(
+export async function putPageImage(
   analysisId: string,
   pageNumber: number,
-): Promise<string | null> {
+  dataUrl: string,
+): Promise<string> {
+  return putPageImageBlob(analysisId, pageNumber, dataUrlToBlob(dataUrl));
+}
+
+export async function getPageImageBlob(
+  analysisId: string,
+  pageNumber: number,
+): Promise<Blob | null> {
   const db = await openDb();
   const blob = await new Promise<Blob | undefined>((resolve, reject) => {
     const tx = db.transaction(STORE, "readonly");
@@ -72,11 +79,19 @@ export async function getPageImageObjectUrl(
     req.onerror = () => reject(req.error ?? new Error("IndexedDB read failed"));
   });
   db.close();
+  return blob ?? null;
+}
+
+export async function getPageImageObjectUrl(
+  analysisId: string,
+  pageNumber: number,
+): Promise<string | null> {
+  const blob = await getPageImageBlob(analysisId, pageNumber);
   if (!blob) return null;
   return URL.createObjectURL(blob);
 }
 
-/** Resolve `idb:…` or pass through data:/http(s) URLs. */
+/** Resolve `idb:…`, `sb:plans/…`, or pass through data:/http(s) URLs. */
 export async function resolvePageImagePath(
   imagePath: string,
   analysisId: string,
@@ -89,16 +104,49 @@ export async function resolvePageImagePath(
   ) {
     return imagePath;
   }
-  if (imagePath.startsWith("idb:")) {
-    const url = await getPageImageObjectUrl(analysisId, pageNumber);
-    if (!url) {
-      throw new Error(
-        `Page image missing for ${analysisId} page ${pageNumber}. Re-upload the PDF.`,
-      );
+
+  const cached = await getPageImageObjectUrl(analysisId, pageNumber);
+  if (cached) return cached;
+
+  if (imagePath.startsWith("sb:")) {
+    const { parsePlanImageRef, signedPlanUrl } = await import("@/lib/supabase/plans");
+    const parsed = parsePlanImageRef(imagePath);
+    if (!parsed) {
+      throw new Error(`Invalid storage image path for ${analysisId} page ${pageNumber}.`);
     }
+    const signed = await signedPlanUrl(parsed.path);
+    const res = await fetch(signed);
+    if (!res.ok) {
+      throw new Error(`Could not download page ${pageNumber} from storage (${res.status}).`);
+    }
+    const blob = await res.blob();
+    await putPageImageBlob(analysisId, pageNumber, blob);
+    const url = await getPageImageObjectUrl(analysisId, pageNumber);
+    if (!url) throw new Error(`Page image missing for ${analysisId} page ${pageNumber}.`);
     return url;
   }
+
+  if (imagePath.startsWith("idb:")) {
+    throw new Error(
+      `Page image missing for ${analysisId} page ${pageNumber}. Re-upload the PDF.`,
+    );
+  }
   return imagePath;
+}
+
+export async function deletePageImageBlob(
+  analysisId: string,
+  pageNumber: number,
+): Promise<void> {
+  if (typeof indexedDB === "undefined") return;
+  const db = await openDb();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(STORE, "readwrite");
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error ?? new Error("IndexedDB delete failed"));
+    tx.objectStore(STORE).delete(pageKey(analysisId, pageNumber));
+  });
+  db.close();
 }
 
 export async function deleteAnalysisPageImages(analysisId: string): Promise<void> {

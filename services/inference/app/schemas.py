@@ -72,6 +72,71 @@ class PlanPageSchema(BaseModel):
     scale_m_per_pixel: float | None = None
     scale_source: str | None = None
     scale_confidence: float | None = None
+    document_id: str | None = None
+    source_file_name: str | None = None
+    level_name: str | None = None
+    level_index: int | None = None
+    floor_id: str | None = None
+
+
+class HierarchyObjectSchema(BaseModel):
+    id: str
+    kind: str
+    label: str
+    parent_room_id: str | None = None
+    parent_unit_id: str | None = None
+    confidence: float = Field(ge=0.0, le=1.0)
+
+
+class HierarchyRoomSchema(BaseModel):
+    id: str
+    label: str
+    room_type: str
+    unit_id: str | None = None
+    is_common: bool = False
+    area_m2: float | None = None
+    confidence: float = Field(ge=0.0, le=1.0)
+    object_ids: list[str] = Field(default_factory=list)
+
+
+class HierarchyUnitSchema(BaseModel):
+    id: str
+    label: str
+    area_m2: float | None = None
+    room_ids: list[str] = Field(default_factory=list)
+    bedroom_count: int = 0
+    bathroom_count: int = 0
+    confidence: float = Field(ge=0.0, le=1.0)
+    review_required: bool = False
+
+
+class HierarchyFloorSchema(BaseModel):
+    id: str
+    level_name: str
+    level_index: int
+    page_id: str
+    page_number: int
+    document_id: str | None = None
+    source_file_name: str | None = None
+    is_floor_plan: bool = True
+    unit_ids: list[str] = Field(default_factory=list)
+    common_area_ids: list[str] = Field(default_factory=list)
+    unassigned_room_ids: list[str] = Field(default_factory=list)
+    properties: dict[str, Any] = Field(default_factory=dict)
+
+
+class BuildingHierarchySchema(BaseModel):
+    schema_version: str = "1.0.0"
+    building_id: str
+    project_id: str
+    analysis_id: str
+    name: str
+    floors: list[HierarchyFloorSchema] = Field(default_factory=list)
+    units: list[HierarchyUnitSchema] = Field(default_factory=list)
+    rooms: list[HierarchyRoomSchema] = Field(default_factory=list)
+    objects: list[HierarchyObjectSchema] = Field(default_factory=list)
+    created_at: datetime | str | None = None
+    updated_at: datetime | str | None = None
 
 
 class ComplianceResultSchema(BaseModel):
@@ -124,6 +189,7 @@ class AnalysisResultSchema(BaseModel):
     spaces: list[SpaceSchema]
     openings: list[OpeningSchema]
     units: list[UnitSchema]
+    hierarchy: BuildingHierarchySchema | None = None
     compliance_results: list[ComplianceResultSchema]
     unit_summaries: list[UnitSummarySchema]
     review_warnings: list[ReviewWarningSchema]

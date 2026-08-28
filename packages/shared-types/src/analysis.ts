@@ -44,6 +44,8 @@ export interface Analysis {
   pageCount?: number;
   unitCount?: number;
   reviewCount?: number;
+  /** Private Storage folder: `{userId}/{projectId}/{analysisId}` */
+  storagePath?: string;
 }
 
 export const ANALYSIS_STAGES: AnalysisStage[] = [

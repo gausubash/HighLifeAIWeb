@@ -1,0 +1,7 @@
+# Dedicated floorData / TensorFlow CPU env (Python 3.10–3.12 only).
+# Create:  py -3.11 -m venv .venv-tf
+# Install: .venv-tf\Scripts\python.exe -m pip install -r requirements-tensorflow.txt
+tensorflow-cpu>=2.16.0,<2.20.0
+numpy>=1.26.0,<2.2.0
+Pillow>=10.0.0
+PyYAML>=6.0.0

@@ -1,13 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { projectStore } from "@/lib/mock/store";
+import { projectStore } from "@/lib/data/projectStore";
 import type { Analysis, AnalysisResult, Project } from "@highlife/shared-types";
 import type { ScaleInfo } from "@/lib/scale/parseScale";
 
 /**
  * True after the first client mount. Ensures SSR and first client paint both
- * see empty store data; localStorage is applied only after hydration.
+ * see empty store data; Supabase hydrate runs in AuthProvider before the workspace.
  */
 export function useStoreReady() {
   const [ready, setReady] = useState(false);

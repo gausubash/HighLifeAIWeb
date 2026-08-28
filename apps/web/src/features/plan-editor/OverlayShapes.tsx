@@ -1,12 +1,11 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { Layer, Line, Rect, Stage, Circle, Text } from "react-konva";
+import { Circle, Layer, Line, Rect, Stage } from "react-konva";
 import type { Point } from "@highlife/shared-types";
-import type { OverlayEntity, OverlayGeometry } from "./types";
+import type { OverlayEntity } from "./types";
 import { OVERLAY_LAYERS } from "./types";
-import { dashForStatus, flattenPoints, LAYER_STROKE, roomFill } from "./styles";
-import { entityAreaHint } from "./geometry";
+import { classFill, classSwatch, dashForStatus, flattenPoints } from "./styles";
 
 interface OverlayShapesProps {
   entities: OverlayEntity[];
@@ -18,10 +17,17 @@ interface OverlayShapesProps {
   draftPoints?: Point[];
   draftClosed?: boolean;
   draftRect?: { x: number; y: number; width: number; height: number } | null;
+  activeTile?: { x: number; y: number; width: number; height: number } | null;
+  /** Full OCR crop currently being parsed (image pixel coords). */
+  ocrRegion?: { x: number; y: number; width: number; height: number } | null;
+  /** Tile window inside that crop (image pixel coords). */
+  activeOcrTile?: { x: number; y: number; width: number; height: number } | null;
+  /** Detection overlays: shaded fill only (crisper when zoomed). Annotate keeps outlines. */
+  fillOnlyClosed?: boolean;
 }
 
-function strokeWidth(scale: number): number {
-  return Math.max(1.25 / scale, 0.4);
+function screenPx(px: number, scale: number): number {
+  return px / Math.max(scale, 0.04);
 }
 
 function ShapeOf({
@@ -30,66 +36,112 @@ function ShapeOf({
   hovered,
   scale,
   opacity,
+  fillOnlyClosed,
 }: {
   entity: OverlayEntity;
   selected: boolean;
   hovered: boolean;
   scale: number;
   opacity: number;
+  fillOnlyClosed: boolean;
 }) {
+  const accent = classSwatch(entity.label);
   const isWall = entity.layer === "walls" || entity.type === "wall";
-  const stroke = isWall ? "rgba(250, 204, 21, 0.8)" : LAYER_STROKE[entity.layer];
   const dash = isWall ? undefined : dashForStatus(entity.status);
-  const sw =
-    (isWall ? Math.max(2.8 / scale, 1.5) : strokeWidth(scale)) * (selected || hovered ? 1.8 : 1);
-  const g = entity.geometry;
-  const fill =
-    isWall
-      ? "rgba(250, 204, 21, 0.18)"
-      : g.kind === "polygon" || g.kind === "rect" || g.kind === "mask"
-        ? entity.layer === "rooms" || entity.layer === "layout"
-          ? roomFill(entity.attributes.roomType ?? entity.label)
-          : g.kind === "mask"
-            ? "rgba(219, 39, 119, 0.12)"
-            : "rgba(100, 116, 139, 0.08)"
-        : undefined;
+  const emphasize = selected || hovered;
+  const closed =
+    entity.geometry.kind === "polygon" ||
+    entity.geometry.kind === "rect" ||
+    entity.geometry.kind === "mask";
+  // Stronger fill when outlines are off so walls stay readable.
+  const fillAlpha =
+    fillOnlyClosed && closed
+      ? emphasize
+        ? 0.55
+        : isWall
+          ? 0.48
+          : 0.4
+      : emphasize
+        ? 0.42
+        : 0.34;
+  const fill = closed ? classFill(entity.label, fillAlpha) : undefined;
+  const showStroke = !closed || !fillOnlyClosed || emphasize;
+  const sw = screenPx(emphasize ? 2 : 1.25, scale);
 
-  const common = {
-    stroke,
+  const strokeCommon = {
+    stroke: accent,
     strokeWidth: sw,
     dash,
     opacity,
+    lineCap: "butt" as const,
+    lineJoin: "miter" as const,
     listening: false,
     perfectDrawEnabled: false,
+    shadowForStrokeEnabled: false,
+    hitStrokeWidth: 0,
   };
+
+  const g = entity.geometry;
 
   if (g.kind === "rect") {
     return (
-      <Rect
-        x={g.x}
-        y={g.y}
-        width={g.width}
-        height={g.height}
-        fill={fill}
-        {...common}
-      />
+      <>
+        <Rect
+          x={g.x}
+          y={g.y}
+          width={g.width}
+          height={g.height}
+          fill={fill}
+          listening={false}
+          perfectDrawEnabled={false}
+          opacity={opacity}
+        />
+        {showStroke ? (
+          <Rect
+            x={g.x}
+            y={g.y}
+            width={g.width}
+            height={g.height}
+            fillEnabled={false}
+            {...strokeCommon}
+          />
+        ) : null}
+      </>
     );
   }
   if (g.kind === "point") {
+    const r = screenPx(emphasize ? 5 : 4, scale);
     return (
-      <Circle x={g.x} y={g.y} radius={Math.max(4 / scale, 2)} fill={stroke} {...common} />
+      <>
+        <Circle
+          x={g.x}
+          y={g.y}
+          radius={r + screenPx(1.5, scale)}
+          fill="white"
+          opacity={opacity}
+          listening={false}
+        />
+        <Circle x={g.x} y={g.y} radius={r} fill={accent} opacity={opacity} listening={false} />
+      </>
     );
   }
-  const closed = g.kind === "polygon" || g.kind === "mask" || (g.kind === "polyline" && g.closed);
+  const closedLine = g.kind === "polygon" || g.kind === "mask" || (g.kind === "polyline" && g.closed);
+  const pts = flattenPoints(g);
   return (
-    <Line
-      points={flattenPoints(g)}
-      closed={closed}
-      fill={closed ? fill : undefined}
-      lineCap="round"
-      lineJoin="round"
-      {...common}
-    />
+    <>
+      <Line
+        points={pts}
+        closed={closedLine}
+        fill={closedLine ? fill : undefined}
+        listening={false}
+        perfectDrawEnabled={false}
+        opacity={opacity}
+        fillEnabled={Boolean(closedLine && fill)}
+      />
+      {showStroke ? (
+        <Line points={pts} closed={closedLine} fillEnabled={false} {...strokeCommon} />
+      ) : null}
+    </>
   );
 }
 
@@ -103,6 +155,10 @@ export function OverlayShapes({
   draftPoints,
   draftClosed,
   draftRect,
+  activeTile,
+  ocrRegion = null,
+  activeOcrTile = null,
+  fillOnlyClosed = false,
 }: OverlayShapesProps) {
   const selected = new Set(selectedIds);
   const orderedLayers = [...OVERLAY_LAYERS].sort((a, b) => a.zIndex - b.zIndex);
@@ -118,7 +174,7 @@ export function OverlayShapes({
     });
   });
 
-  const hoverEntity = hoverId ? visibleEntities.find((e) => e.id === hoverId) : null;
+  const draftSw = screenPx(1.75, scale);
 
   return (
     <>
@@ -130,85 +186,109 @@ export function OverlayShapes({
           hovered={hoverId === entity.id}
           scale={scale}
           opacity={layers[entity.layer]?.opacity ?? 1}
+          fillOnlyClosed={fillOnlyClosed}
         />
       ))}
-      {visibleEntities.map((entity) => {
-        const pos = centroid(entity.geometry);
-        const selectedEntity = selected.has(entity.id);
-        return (
-          <Text
-            key={`${entity.id}-label`}
-            x={pos.x}
-            y={pos.y}
-            text={`${entity.label} ${Math.round(entity.confidence * 100)}%`}
-            fontSize={Math.max(11 / scale, selectedEntity ? 12 : 10)}
-            fill="#0f172a"
-            offsetY={8}
-            listening={false}
-          />
-        );
-      })}
-      {hoverEntity && (
-        <Text
-          x={tooltipPos(hoverEntity.geometry).x}
-          y={tooltipPos(hoverEntity.geometry).y}
-          text={tooltipText(hoverEntity)}
-          fontSize={Math.max(12 / scale, 10)}
-          fill="#0f172a"
-          listening={false}
-        />
-      )}
       {draftRect && (
         <Rect
           {...draftRect}
           stroke="#2563eb"
-          dash={[8 / scale, 4 / scale]}
-          strokeWidth={strokeWidth(scale)}
-          fill="rgba(37,99,235,0.08)"
+          dash={[screenPx(8, scale), screenPx(4, scale)]}
+          strokeWidth={draftSw}
+          fill={classFill("Bedroom", 0.2)}
           listening={false}
+          perfectDrawEnabled={false}
         />
       )}
+      {activeTile && activeTile.width > 0 && activeTile.height > 0 ? (
+        <>
+          <Rect
+            x={activeTile.x}
+            y={activeTile.y}
+            width={activeTile.width}
+            height={activeTile.height}
+            fill="rgba(14, 165, 233, 0.12)"
+            listening={false}
+            perfectDrawEnabled={false}
+          />
+          <Rect
+            x={activeTile.x}
+            y={activeTile.y}
+            width={activeTile.width}
+            height={activeTile.height}
+            stroke="#0284c7"
+            dash={[screenPx(10, scale), screenPx(6, scale)]}
+            strokeWidth={screenPx(2, scale)}
+            fillEnabled={false}
+            listening={false}
+            perfectDrawEnabled={false}
+          />
+        </>
+      ) : null}
+      {ocrRegion && ocrRegion.width > 0 && ocrRegion.height > 0 ? (
+        <>
+          <Rect
+            x={ocrRegion.x}
+            y={ocrRegion.y}
+            width={ocrRegion.width}
+            height={ocrRegion.height}
+            fill="rgba(13, 148, 136, 0.08)"
+            listening={false}
+            perfectDrawEnabled={false}
+          />
+          <Rect
+            x={ocrRegion.x}
+            y={ocrRegion.y}
+            width={ocrRegion.width}
+            height={ocrRegion.height}
+            stroke="#0d9488"
+            dash={[screenPx(8, scale), screenPx(6, scale)]}
+            strokeWidth={screenPx(1.5, scale)}
+            fillEnabled={false}
+            listening={false}
+            perfectDrawEnabled={false}
+          />
+        </>
+      ) : null}
+      {activeOcrTile && activeOcrTile.width > 0 && activeOcrTile.height > 0 ? (
+        <>
+          <Rect
+            x={activeOcrTile.x}
+            y={activeOcrTile.y}
+            width={activeOcrTile.width}
+            height={activeOcrTile.height}
+            fill="rgba(13, 148, 136, 0.2)"
+            listening={false}
+            perfectDrawEnabled={false}
+          />
+          <Rect
+            x={activeOcrTile.x}
+            y={activeOcrTile.y}
+            width={activeOcrTile.width}
+            height={activeOcrTile.height}
+            stroke="#0f766e"
+            dash={[screenPx(10, scale), screenPx(5, scale)]}
+            strokeWidth={screenPx(2.5, scale)}
+            fillEnabled={false}
+            listening={false}
+            perfectDrawEnabled={false}
+          />
+        </>
+      ) : null}
       {draftPoints && draftPoints.length > 0 && (
         <Line
           points={draftPoints.flatMap((p) => [p.x, p.y])}
           stroke="#2563eb"
-          dash={[8 / scale, 4 / scale]}
-          strokeWidth={strokeWidth(scale)}
+          dash={[screenPx(8, scale), screenPx(4, scale)]}
+          strokeWidth={draftSw}
           closed={Boolean(draftClosed)}
-          fill={draftClosed ? "rgba(37,99,235,0.08)" : undefined}
+          fill={draftClosed ? classFill("Bedroom", 0.2) : undefined}
           listening={false}
+          perfectDrawEnabled={false}
         />
       )}
     </>
   );
-}
-
-function centroid(g: OverlayGeometry): Point {
-  if (g.kind === "point") return { x: g.x, y: g.y };
-  if (g.kind === "rect") return { x: g.x + g.width / 2, y: g.y + g.height / 2 };
-  if (g.points.length === 0) return { x: 0, y: 0 };
-  const x = g.points.reduce((sum, p) => sum + p.x, 0) / g.points.length;
-  const y = g.points.reduce((sum, p) => sum + p.y, 0) / g.points.length;
-  return { x, y };
-}
-
-function tooltipPos(g: OverlayGeometry): Point {
-  if (g.kind === "point") return { x: g.x + 8, y: g.y - 8 };
-  if (g.kind === "rect") return { x: g.x, y: g.y - 4 };
-  const p = g.points[0];
-  return { x: (p?.x ?? 0) + 8, y: (p?.y ?? 0) - 8 };
-}
-
-function tooltipText(entity: OverlayEntity): string {
-  const measure = entityAreaHint(entity);
-  const bits = [
-    entity.id.slice(0, 8),
-    entity.type,
-    `${Math.round(entity.confidence * 100)}%`,
-    entity.status,
-    measure,
-  ].filter(Boolean);
-  return bits.join(" · ");
 }
 
 interface OverlayKonvaStageProps {
@@ -216,6 +296,7 @@ interface OverlayKonvaStageProps {
   height: number;
   imageWidth: number;
   imageHeight: number;
+  zoom?: number;
   children: ReactNode;
 }
 
@@ -225,13 +306,22 @@ export function OverlayKonvaStage({
   height,
   imageWidth,
   imageHeight,
+  zoom = 1,
   children,
 }: OverlayKonvaStageProps) {
   const sx = imageWidth > 0 ? width / imageWidth : 1;
   const sy = imageHeight > 0 ? height / imageHeight : 1;
+  const dpr = typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
+  // Parent applies CSS zoom — keep backing-store sharp (was capped at 4 → soft when zoomed).
+  const pixelRatio = Math.min(8, Math.max(1, dpr * Math.max(1, zoom)));
   return (
-    <Stage width={Math.max(1, Math.round(width))} height={Math.max(1, Math.round(height))} listening={false}>
-      <Layer scaleX={sx} scaleY={sy} listening={false}>
+    <Stage
+      width={Math.max(1, Math.round(width))}
+      height={Math.max(1, Math.round(height))}
+      listening={false}
+      pixelRatio={pixelRatio}
+    >
+      <Layer scaleX={sx} scaleY={sy} listening={false} imageSmoothingEnabled={false}>
         {children}
       </Layer>
     </Stage>

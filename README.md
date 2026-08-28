@@ -68,7 +68,9 @@ pip install -r requirements.txt
 uvicorn app.api:app --reload --port 8000
 ```
 
-Copy `.env.example` to `.env`. Set `NEXT_PUBLIC_FLOOR_PLAN_API_URL=http://127.0.0.1:8001` when wiring the extraction API. Existing scale calibration in the Next.js viewer does not require this service.
+Copy `.env.example` to `.env` and `apps/web/.env.local`. Set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` from the HighLife Supabase project. Detect still uses `NEXT_PUBLIC_INFERENCE_API_URL=http://127.0.0.1:8000` on this PC. Set `NEXT_PUBLIC_FLOOR_PLAN_API_URL=http://127.0.0.1:8001` when wiring the extraction API.
+
+**Model Studio** (`/studio`): upload a YOLO dataset ZIP, fine-tune detect or segment on this PC (uvicorn must be running), save weights to Supabase, then run inference or activate a model for the plan viewer.
 
 ## Run modes
 
@@ -84,13 +86,13 @@ Copy `.env.example` to `.env`. Set `NEXT_PUBLIC_FLOOR_PLAN_API_URL=http://127.0.
 |-------|--------|------------------------------------------|
 | 1     | ✅      | Monorepo scaffold, CI                    |
 | 2     | ✅      | Mock vertical slice (upload → viewer)    |
-| 3     | 🔲      | Supabase auth, projects, storage, RLS    |
-| 4     | 🔲      | Master annotations, validation, splits   |
-| 5     | 🔲      | CPU geometry pipeline                    |
-| 6     | 🔲      | RACE GPU worker + training (job queue via data plane) |
-| 7     | 🔲      | Review UI, exports, reports              |
-| 8     | 🔲      | Policy engine (versioned YAML)           |
-| 9     | 🔲      | Scalability (retries, heartbeat, batch)  |
+| 3     | ✅      | Supabase auth, projects, storage, RLS    |
+| 4     | ✅      | Master annotations, validation, splits   |
+| 5     | ✅      | CPU geometry pipeline                    |
+| 6     | ✅      | RACE GPU worker + training (job queue via data plane) |
+| 7     | ✅      | Review UI, exports, reports              |
+| 8     | ✅      | Policy engine (versioned YAML)           |
+| 9     | ✅      | Scalability (retries, heartbeat, batch)  |
 
 ## Security
 

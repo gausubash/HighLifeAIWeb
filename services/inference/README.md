@@ -19,13 +19,36 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
+### floorData / TensorFlow (Model Studio)
+
+The main `.venv` may be Python 3.13+ (no TensorFlow wheels). Studio fine-tunes DeepLab/UNet via a **separate** venv:
+
+```bash
+py -3.11 -m venv .venv-tf
+.venv-tf\Scripts\python.exe -m pip install -r requirements-tensorflow.txt
+```
+
+Keep uvicorn on `.venv`; floorData train jobs spawn `.venv-tf` automatically (override with `TENSORFLOW_PYTHON`).
+
 Copy `.env.example` to `.env` and keep `RUN_MODE=mock` / `DEVICE=cpu`.
 
 ## Page detect overlay (CPU OK)
 
 The plan viewer calls `POST /v1/detect`. Layout cropping and the Architect fixture model are **off** by default. Walls run on the **full page** (MitUNet). Set `USE_LAYOUT_DETECTOR=true` / `YOLO_WEIGHTS` and `USE_ROOM_DETECTOR=true` / `YOLO_ROOM_WEIGHTS` when you have those models.
 
-Set `WALL_BACKEND=yolo` for oriented wall boxes. Roboflow runs when `ROBOFLOW_API_KEY` is set.
+Set `WALL_BACKEND=yolo` for oriented wall boxes. Legacy MMDet checkpoints (`cascade_swin`, `faster_rcnn`, `retinanet`) download from [Google Drive weights](https://drive.google.com/drive/folders/1MgW3Qo-8K4OrHi4ebvYd-81cTqQxwLgz) into `models/`.
+
+### Roboflow floorplan-iculh (local ONNX)
+
+Universe models are not a public `.pt` download. Prefetch caches an ONNX under `models/roboflow_cache/` (uses your API key once), then Detect runs on-device via Ultralytics:
+
+```bash
+# needs Python 3.10–3.12 (.venv-tf) + inference package
+.venv-tf\Scripts\python.exe -m pip install inference
+.venv-tf\Scripts\python.exe scripts/prefetch_roboflow.py
+```
+
+Then pick **Roboflow floorplan-iculh/1** in Detect (`wall:roboflow`). Cloud API remains a fallback if the ONNX cache is missing.
 
 First detect may download MitUNet weights. Optional cache: `models/mitunet_walls.pth`.
 

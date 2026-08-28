@@ -59,6 +59,10 @@ def mitunet_ready(settings: Settings | None = None) -> bool:
     backend = (settings.wall_backend or "mitunet").strip().lower()
     if backend == "yolo":
         return False
+    from app.yolo.wall_registry import OPTIONAL_WALL_BACKENDS
+
+    if backend in OPTIONAL_WALL_BACKENDS:
+        return False
     if is_remote_url(raw):
         return True
     path = Path(resolve_mitunet_weights(settings))
@@ -188,20 +192,32 @@ def predict_wall_mask(rgb: np.ndarray, settings: Settings | None = None) -> np.n
     """Return a float mask in crop pixel space, values in [0, 1]."""
     import torch
 
+    from app.yolo.letterbox import letterbox_rgb, unletterbox_mask
+
     settings = settings or get_settings()
     model = get_mitunet_model(settings)
-    height, width = rgb.shape[:2]
     size = max(32, int(settings.mitunet_wall_imgsz))
-    image = Image.fromarray(np.ascontiguousarray(rgb)).resize((size, size), Image.BILINEAR)
-    array = np.asarray(image).astype(np.float32) / 255.0
+    canvas, scale, ox, oy, orig_hw = letterbox_rgb(rgb, size, fill=255, center=True)
+    array = canvas.astype(np.float32) / 255.0
     array = (array - IMAGENET_MEAN) / IMAGENET_STD
     tensor = torch.from_numpy(np.transpose(array, (2, 0, 1))).unsqueeze(0)
     tensor = tensor.to(settings.device.value)
     with torch.no_grad():
         logits = model(tensor)
         probs = torch.sigmoid(logits)[0, 0].detach().cpu().numpy()
-    resized = Image.fromarray(probs, mode="F").resize((width, height), Image.BILINEAR)
-    return np.asarray(resized, dtype=np.float32)
+    if probs.shape[0] != size or probs.shape[1] != size:
+        probs = np.asarray(
+            Image.fromarray(probs.astype(np.float32), mode="F").resize((size, size), Image.BILINEAR),
+            dtype=np.float32,
+        )
+    return unletterbox_mask(
+        probs,
+        scale=scale,
+        offset_x=ox,
+        offset_y=oy,
+        orig_hw=orig_hw,
+        canvas_size=size,
+    )
 
 
 def wall_polygons_from_rgb(

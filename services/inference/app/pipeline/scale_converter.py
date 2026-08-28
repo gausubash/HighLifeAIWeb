@@ -21,12 +21,11 @@ A_PAPER_SIZES_MM: dict[str, tuple[int, int]] = {
 }
 
 _SCALE_PAPER_RE = re.compile(
-    r"(?i)(?:scale\s*[:=]?\s*)?(?:[1lI|]\s*[:/\-．.]\s*)(?P<scale>\d{1,5})"
-    r"(?:\s*[@©]\s*|\s+)(?:iso\s*)?(?P<paper>[ab]\s*[0-5])[a-z]?"
+    r"(?i)(?:scale\s*[:=]?\s*)?(?:[1lI|]\s*[:/\-．.=]\s*)(?P<scale>\d{1,5})\s*[@©]\s*(?:iso\s*)?(?P<paper>[ab]\s*[0-5])[a-z]?"
 )
 
 _SCALE_RATIO_ONLY_RE = re.compile(
-    r"(?i)(?:scale\s*[:=]?\s*)?(?:[1lI|]\s*[:/\-．.]\s*)(?P<scale>\d{1,5})\b"
+    r"(?i)(?:scale\s*[:=]?\s*)?(?:[1lI|]\s*[:/\-．.=]\s*)(?P<scale>\d{1,5})\b"
 )
 
 
@@ -41,7 +40,17 @@ def normalize_ocr_scale_text(text: str) -> str:
         .replace("－", "-")
         .replace("．", ".")
         .replace("×", "x")
+        .replace("©", "@")
     )
+    # Fix OCR letter 'O'/'o' replacing zero in common scale ratios
+    t = re.sub(r"\b1\s*[:/\-.]\s*(\d{1,4})[Oo]\b", r"1:\g<1>0", t)
+    t = re.sub(r"\b1\s*[:/\-.]\s*(\d{1,3})[Oo][Oo]\b", r"1:\g<1>00", t)
+    t = re.sub(r"\b1\s*[:/\-.]\s*[Oo]\b", "1:0", t)
+
+    # Normalize "1 to 100", "1 - 100", "1 = 100", "1 / 100", "1 : 100"
+    t = re.sub(r"(?i)\b1\s+(?:to|TO)\s+(\d{1,5})\b", r"1:\1", t)
+    t = re.sub(r"(?i)\b([1lI|])\s*[:/\-．.=]\s*(\d{1,5})\b", r"1:\2", t)
+
     t = re.sub(r"(?i)(?<![0-9a-z])[lI|]\s*[:/]", "1:", t)
     t = re.sub(
         r"(?i)(scale\s*[:=]?\s*)1\s*[.\-]\s*(\d{2,5})\b",
@@ -89,12 +98,11 @@ def parse_scale_and_paper(text: str) -> tuple[int, str] | None:
             continue
         seen.add(candidate)
         match = _SCALE_PAPER_RE.search(candidate)
-        if not match:
-            continue
-        scale = int(match.group("scale"))
-        paper = normalize_paper_code(match.group("paper"))
-        if paper and 1 <= scale <= 10000:
-            return scale, paper
+        if match:
+            scale = int(match.group("scale"))
+            paper = normalize_paper_code(match.group("paper"))
+            if paper and 1 <= scale <= 10000:
+                return scale, paper
     return None
 
 
@@ -105,14 +113,61 @@ def parse_scale_ratio_from_text(text: str) -> int | None:
     if decl:
         return decl[0]
     normalized = normalize_ocr_scale_text(text)
+
+    # 1. Prioritize lines explicitly containing "scale"
+    lines = (text or "").splitlines() + (normalized or "").splitlines()
+    for line in lines:
+        if "scale" in line.lower():
+            m = re.search(r"(?i)(?:scale\s*[:=]?\s*)?[1lI|]\s*[:/\-．.=]\s*(\d{1,5})\b", line)
+            if m:
+                val = int(m.group(1))
+                if 1 <= val <= 10000:
+                    return val
+
+    # 2. Standard architectural scale ratios in 1:N format
+    arch_scales = [
+        50, 100, 200, 500, 20, 25, 75, 125, 150, 250, 300, 400, 750, 1000, 1250,
+        1500, 2000, 2500, 5000, 10, 5, 2, 1,
+    ]
+    for candidate in (text, normalized):
+        for match in _SCALE_RATIO_ONLY_RE.finditer(candidate):
+            scale = int(match.group("scale"))
+            if scale in arch_scales:
+                return scale
+
+    # 3. Fallback to any 1:N ratio
     best: int | None = None
     for candidate in (text, normalized):
         for match in _SCALE_RATIO_ONLY_RE.finditer(candidate):
             scale = int(match.group("scale"))
-            if 5 <= scale <= 10000:
+            if 1 <= scale <= 10000:
                 if best is None or scale > best:
                     best = scale
     return best
+
+
+_PAPER_ONLY_RE = re.compile(r"(?i)(?:@|©)\s*(?:iso\s*)?([ab]\s*[0-5])[a-z]?\b")
+
+
+def parse_paper_from_text(text: str) -> str | None:
+    """Parse paper size strictly preceded by '@' (e.g. '@ A1', '@ A3', '@A1')."""
+    if not text:
+        return None
+    for candidate in (text, normalize_ocr_scale_text(text)):
+        if not candidate:
+            continue
+        match = _PAPER_ONLY_RE.search(candidate)
+        if match:
+            paper = normalize_paper_code(match.group(1))
+            if paper:
+                return paper
+    return None
+
+
+def format_scale_declaration(scale: int, paper: str | None = None) -> str:
+    if paper:
+        return f"1:{scale} @ {paper}"
+    return f"1:{scale}"
 
 
 def is_landscape(width_px: int, height_px: int) -> bool:

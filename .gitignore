@@ -6,6 +6,7 @@ node_modules/
 # Python
 .venv/
 .venv*/
+.data/
 __pycache__/
 *.py[cod]
 *.egg-info/
@@ -31,6 +32,7 @@ apps/web/next-env.d.ts
 # IDE
 .idea/
 .vscode/
+.cursor/
 *.swp
 *.swo
 
@@ -47,9 +49,24 @@ annotations/
 models/*.pt
 models/*.pth
 models/*.onnx
+models/*.h5
+models/*.hdf5
+models/*.safetensors
+models/*.pdparams
+models/*.pdiparams
+models/*.pdmodel
+**/models/roboflow_cache/
+**/models/paddleocr-vl/
+**/models/paddleocr-vl-layout/
 *.pt
 *.pth
 *.weights
+*.h5
+*.hdf5
+*.safetensors
+*.pdparams
+*.pdiparams
+*.pdmodel
 captions/
 outputs/
 output/

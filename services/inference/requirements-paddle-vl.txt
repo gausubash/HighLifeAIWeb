@@ -1,0 +1,27 @@
+# PaddleOCR-VL (Hugging Face: PaddlePaddle/PaddleOCR-VL)
+# Separate 0.9B vision-language document parser — not a classic PP-OCR rec checkpoint.
+#
+# Use a dedicated Python 3.10–3.12 venv (can share .venv-ocr if you upgrade it to 3.4+):
+#
+#   py -3.11 -m venv .venv-ocr-vl
+#   .venv-ocr-vl\Scripts\python.exe -m pip install -U pip
+#   # CPU:
+#   .venv-ocr-vl\Scripts\python.exe -m pip install paddlepaddle==3.2.1 -i https://www.paddlepaddle.org.cn/packages/stable/cpu/
+#   # CUDA 12.6 GPU (recommended for VL):
+#   # .venv-ocr-vl\Scripts\python.exe -m pip install paddlepaddle-gpu==3.2.1 -i https://www.paddlepaddle.org.cn/packages/stable/cu126/
+#   .venv-ocr-vl\Scripts\python.exe -m pip install -U "paddleocr[doc-parser]>=3.4.0"
+#
+# Then in services/inference/.env:
+#   PADDLE_OCR_ENABLED=true
+#   PADDLE_OCR_BACKEND=vl
+#   PADDLE_OCR_USE_GPU=true
+#   PADDLE_OCR_PYTHON=C:\...\services\inference\.venv-ocr-vl\Scripts\python.exe
+#
+# First VL run downloads PaddleOCR-VL-0.9B (~2GB). GPU ~4GB VRAM recommended.
+# See https://huggingface.co/PaddlePaddle/PaddleOCR-VL
+# Official usage: https://www.paddleocr.ai/latest/version3.x/pipeline_usage/PaddleOCR-VL.html
+
+numpy>=1.23.5,<2
+paddlepaddle>=3.2.0,<4
+paddleocr[doc-parser]>=3.4.0
+Pillow>=10.0.0

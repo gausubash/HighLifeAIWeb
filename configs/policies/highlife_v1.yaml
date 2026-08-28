@@ -1,0 +1,48 @@
+# HighLife design-policy pack v1 (internal — not full NCC).
+# Rules evaluate a FloorPlanSceneGraph; they never invent geometry.
+
+version: highlife_v1
+name: HighLife Design Policy v1
+description: >
+  Deterministic starter rules for residential unit checks.
+  Metric rules need calibration (mmPerPixel). Topology rules can run without scale.
+
+rules:
+  - code: HL-ROOM-BED-MIN
+    name: Minimum bedroom area
+    severity: fail
+    requires_scale: true
+    room_labels: [Bedroom, Bed]
+    min_area_m2: 9.0
+    explanation: "Bedroom area {measured:.1f} m² is below the {required:.1f} m² minimum."
+
+  - code: HL-ROOM-LIVING-MIN
+    name: Minimum living area
+    severity: fail
+    requires_scale: true
+    room_labels: [Living, Living Room, Lounge]
+    min_area_m2: 12.0
+    explanation: "Living area {measured:.1f} m² is below the {required:.1f} m² minimum."
+
+  - code: HL-ROOM-TYPES-REQUIRED
+    name: Required room types present
+    severity: fail
+    requires_scale: false
+    required_labels: [Bedroom, Bathroom]
+    explanation: "Missing required room type(s): {missing}."
+
+  - code: HL-POS-MIN
+    name: Private open space area
+    severity: fail
+    requires_scale: true
+    room_labels: [Balcony, Terrace, Courtyard, Private Open Space, POS]
+    min_area_m2: 8.0
+    explanation: "Private open space {measured:.1f} m² is below the {required:.1f} m² minimum."
+    optional_if_absent: true
+
+  - code: HL-WALL-PRESENT
+    name: Walls detected
+    severity: uncertain
+    requires_scale: false
+    min_wall_count: 1
+    explanation: "No wall geometry in the scene graph — detection or review required."

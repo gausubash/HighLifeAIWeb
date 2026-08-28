@@ -64,7 +64,7 @@ export const DEFAULT_LAYER_SETTINGS: Record<OverlayLayerId, LayerSettings> = {
   calibration: { visible: true, opacity: 1, locked: false, showRejected: false },
   layout: { visible: true, opacity: 1, locked: false, showRejected: false },
   walls: { visible: true, opacity: 1, locked: false, showRejected: false },
-  rooms: { visible: true, opacity: 0.85, locked: false, showRejected: false },
+  rooms: { visible: true, opacity: 1, locked: false, showRejected: false },
   doors: { visible: true, opacity: 1, locked: false, showRejected: false },
   windows: { visible: true, opacity: 1, locked: false, showRejected: false },
   labels: { visible: true, opacity: 1, locked: false, showRejected: false },

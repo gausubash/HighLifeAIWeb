@@ -1,5 +1,10 @@
 "use client";
 
+import {
+  PDF_RENDER_DPI,
+  PDF_UPLOAD_DPI_MAX,
+  PDF_UPLOAD_DPI_MIN,
+} from "@/lib/pdf/renderPdfFirstPage";
 import { usePdfUpload } from "./usePdfUpload";
 
 interface UploadDropzoneProps {
@@ -8,15 +13,45 @@ interface UploadDropzoneProps {
 }
 
 export function UploadDropzone({ projectId, onComplete }: UploadDropzoneProps) {
-  const { error, progress, uploading, inputRef, handleDrop, handleFileChange, openFilePicker } =
-    usePdfUpload({ projectId, onComplete });
+  const {
+    error,
+    progress,
+    uploading,
+    pdfDpi,
+    setPdfDpi,
+    inputRef,
+    handleDrop,
+    handleFileChange,
+    openFilePicker,
+  } = usePdfUpload({ projectId, onComplete });
 
   return (
     <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
       <h2 className="mb-1 text-sm font-semibold text-slate-900">Upload floor plan</h2>
       <p className="mb-3 text-xs text-slate-600">
-        PDF, PNG, JPG, or WEBP, max 50 MB. Scale can be confirmed on the drawing after upload.
+        PDF, PNG, JPG, or WEBP, max 50 MB. PDFs are rasterized to page images at your chosen DPI.
+        Scale can be confirmed on the drawing after upload.
       </p>
+
+      <label className="mb-3 flex max-w-xs flex-col gap-1 text-xs font-medium text-slate-600">
+        PDF render DPI
+        <input
+          type="number"
+          min={PDF_UPLOAD_DPI_MIN}
+          max={PDF_UPLOAD_DPI_MAX}
+          step={1}
+          inputMode="numeric"
+          className="rounded border border-slate-300 bg-white px-2 py-1.5 text-sm font-normal text-slate-800 disabled:opacity-50"
+          value={pdfDpi}
+          disabled={uploading}
+          onChange={(e) => setPdfDpi(e.target.value)}
+          onClick={(e) => e.stopPropagation()}
+        />
+        <span className="font-normal text-[11px] text-slate-500">
+          {PDF_UPLOAD_DPI_MIN}–{PDF_UPLOAD_DPI_MAX} DPI. Default {PDF_RENDER_DPI}. Used when
+          converting PDF pages to images; ignored for PNG/JPG uploads.
+        </span>
+      </label>
 
       <div
         role="button"

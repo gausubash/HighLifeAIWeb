@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Convert LabelMe JSON files to YOLO-seg. Delegates to services/inference."""
+"""Convert LabelMe JSON files (one per page) to YOLO-seg. Delegates to services/inference."""
 
 from __future__ import annotations
 

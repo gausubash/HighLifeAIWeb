@@ -33,8 +33,9 @@ def test_predictions_to_regions_polygon_and_box() -> None:
     assert is_wall_region(regions[1]) is False
 
 
-def test_roboflow_ready_requires_api_key(monkeypatch) -> None:
+def test_roboflow_ready_requires_api_key_or_local(monkeypatch) -> None:
     monkeypatch.delenv("ROBOFLOW_API_KEY", raising=False)
+    monkeypatch.setattr("app.yolo.roboflow.resolve_roboflow_weights", lambda settings=None: None)
     settings = Settings(_env_file=None)
     assert roboflow_ready(settings) is False
     monkeypatch.setenv("ROBOFLOW_API_KEY", "rf_test")

@@ -34,6 +34,28 @@ export interface Unit {
   reviewRequired: boolean;
 }
 
+export interface OcrLine {
+  text: string;
+  confidence: number;
+  bbox?: [number, number][] | null;
+}
+
+export interface PageOcrMeta {
+  sheetType?: string;
+  title?: string | null;
+  scaleText?: string | null;
+  paperSize?: string | null;
+  north?: string | null;
+  levelName?: string | null;
+  unitIds?: string[];
+  warnings?: string[];
+  provider?: string;
+  confidence?: number;
+  ocrLineCount?: number;
+  textHint?: string;
+  lines?: OcrLine[];
+}
+
 export interface PlanPage {
   id: string;
   pageNumber: number;
@@ -47,6 +69,18 @@ export interface PlanPage {
   /** How the source page was drawn: vector CAD, scanned raster, or mixed. */
   graphicsKind?: "vector" | "raster" | "hybrid" | "image" | "unknown";
   graphicsSummary?: string;
+  /** Hierarchy: which building/document this page belongs to. */
+  documentId?: string | null;
+  sourceFileName?: string | null;
+  /** OCR on the title block: scale, level, sheet title, unit ids. */
+  ocrMeta?: PageOcrMeta | null;
+  /** OCR on the detected drawing area: room labels, dimensions, notes on the plan. */
+  drawingOcrMeta?: PageOcrMeta | null;
+  /** Storey label, e.g. "Level 2". Defaults derived from pageNumber when missing. */
+  levelName?: string | null;
+  /** Sortable storey index (0-based). Defaults to pageNumber - 1. */
+  levelIndex?: number | null;
+  floorId?: string | null;
 }
 
 /** Layer identifiers for the plan viewer */

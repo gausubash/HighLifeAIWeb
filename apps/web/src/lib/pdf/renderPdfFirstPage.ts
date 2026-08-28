@@ -10,10 +10,23 @@ import {
   countPdfOperators,
   type PdfGraphicsInfo,
 } from "./classifyPdfGraphics";
+import { normalizeRotation, type PageRotationDeg } from "./pageRotation";
 
 export const PDF_RENDER_DPI = 300;
 /** pdf.js viewport scale for 300 DPI: dpi / 72 */
 export const PDF_RENDER_SCALE = PDF_RENDER_DPI / 72;
+
+export const PDF_UPLOAD_DPI_MIN = 150;
+export const PDF_UPLOAD_DPI_MAX = 1200;
+
+export function clampPdfUploadDpi(dpi: number): number {
+  if (!Number.isFinite(dpi)) return PDF_RENDER_DPI;
+  return Math.min(PDF_UPLOAD_DPI_MAX, Math.max(PDF_UPLOAD_DPI_MIN, Math.round(dpi)));
+}
+
+export function pdfRenderScale(dpi: number): number {
+  return clampPdfUploadDpi(dpi) / 72;
+}
 
 export type RenderedPdfPage = {
   pageNumber: number;
@@ -56,7 +69,8 @@ type TextContentLike = {
 };
 
 type PageLike = {
-  getViewport: (args: { scale: number }) => ViewportLike;
+  rotate?: number;
+  getViewport: (args: { scale: number; rotation?: number }) => ViewportLike;
   render: (args: {
     canvasContext: CanvasRenderingContext2D;
     viewport: ViewportLike;
@@ -101,13 +115,16 @@ async function renderSinglePage(
   scale: number,
   dpi: number,
   ops: Record<string, number>,
+  extraRotation: PageRotationDeg = 0,
 ): Promise<RenderedPdfPage> {
-  const baseViewport = page.getViewport({ scale: 1 });
+  const pageRotate = typeof page.rotate === "number" ? page.rotate : 0;
+  const rotation = normalizeRotation(pageRotate + extraRotation);
+  const baseViewport = page.getViewport({ scale: 1, rotation });
   const textContent = await page.getTextContent();
   const textStr = textContent.items.map((item) => item.str ?? "").join(" ");
   const graphics = await inspectPageGraphics(page, ops);
 
-  const viewport = page.getViewport({ scale });
+  const viewport = page.getViewport({ scale, rotation });
   const canvas = document.createElement("canvas");
   const context = canvas.getContext("2d");
   if (!context) throw new Error("Unable to create 2D canvas context.");
@@ -140,18 +157,20 @@ export async function renderAllPdfPagesToPng(
   file: File,
   opts?: {
     dpi?: number;
+    rotation?: PageRotationDeg;
     onProgress?: (done: number, total: number) => void;
   },
 ): Promise<RenderedPdfPage[]> {
   const dpi = opts?.dpi ?? PDF_RENDER_DPI;
   const scale = dpi / 72;
+  const rotation = opts?.rotation ?? 0;
   const { doc, ops } = await loadPdf(file);
   const total = doc.numPages;
   const pages: RenderedPdfPage[] = [];
 
   for (let i = 1; i <= total; i++) {
     const page = await doc.getPage(i);
-    pages.push(await renderSinglePage(page, i, scale, dpi, ops));
+    pages.push(await renderSinglePage(page, i, scale, dpi, ops, rotation));
     opts?.onProgress?.(i, total);
   }
 
@@ -161,10 +180,10 @@ export async function renderAllPdfPagesToPng(
 /** Renders only page 1 (legacy helper). */
 export async function renderPdfFirstPageToPngDataUrl(
   file: File,
-  opts?: { dpi?: number },
+  opts?: { dpi?: number; rotation?: PageRotationDeg },
 ): Promise<RenderedPdfPage> {
   const dpi = opts?.dpi ?? PDF_RENDER_DPI;
   const { doc, ops } = await loadPdf(file);
   const page = await doc.getPage(1);
-  return renderSinglePage(page, 1, dpi / 72, dpi, ops);
+  return renderSinglePage(page, 1, dpi / 72, dpi, ops, opts?.rotation ?? 0);
 }
