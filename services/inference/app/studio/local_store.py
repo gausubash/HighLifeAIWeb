@@ -98,6 +98,18 @@ def _summarize(meta: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _upgrade_north_pose_task(meta: dict[str, Any], path: Path | None = None) -> dict[str, Any]:
+    from app.studio.model_catalog import CATEGORY_NORTH_ARROW, normalize_category
+
+    cat = normalize_category(str(meta.get("category") or "") or None)
+    if cat == CATEGORY_NORTH_ARROW and meta.get("task") != "pose":
+        meta["task"] = "pose"
+        if path is not None:
+            meta["updated_at"] = _now()
+            _write_json(path, meta)
+    return meta
+
+
 def list_datasets() -> list[dict[str, Any]]:
     root = studio_root() / "datasets"
     if not root.is_dir():
@@ -105,7 +117,7 @@ def list_datasets() -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
     for meta_path in root.glob("*/meta.json"):
         try:
-            items.append(_summarize(_read_json(meta_path)))
+            items.append(_summarize(_upgrade_north_pose_task(_read_json(meta_path), meta_path)))
         except (OSError, json.JSONDecodeError):
             continue
     items.sort(key=lambda row: str(row.get("updated_at") or ""), reverse=True)
@@ -116,7 +128,7 @@ def get_dataset(dataset_id: str) -> dict[str, Any]:
     path = dataset_dir(dataset_id) / "meta.json"
     if not path.is_file():
         raise StudioStoreError("Dataset not found.", 404)
-    return _summarize(_read_json(path))
+    return _summarize(_upgrade_north_pose_task(_read_json(path), path))
 
 
 def update_dataset_class_names(dataset_id: str, class_names: list[str]) -> dict[str, Any]:
@@ -134,17 +146,73 @@ def update_dataset_class_names(dataset_id: str, class_names: list[str]) -> dict[
     return _summarize(meta)
 
 
-def create_dataset(*, name: str, task: str, class_names: list[str], category: str | None = None) -> dict[str, Any]:
-    cleaned = name.strip() or "Untitled dataset"
-    if task not in {"detect", "segment"}:
-        raise StudioStoreError("Task must be detect or segment.")
-    if not class_names:
-        raise StudioStoreError("Add at least one class name.")
+def _stock_class_sets() -> list[set[str]]:
     from app.studio.model_catalog import DATASET_CATEGORY_DEFAULTS
 
-    cat = (category or "").strip() or None
+    return [set(list(value.get("class_names") or [])) for value in DATASET_CATEGORY_DEFAULTS.values()]
+
+
+def update_dataset_purpose(
+    dataset_id: str,
+    category: str,
+    class_names: list[str] | None = None,
+) -> dict[str, Any]:
+    from app.studio.dataset import parse_class_names
+    from app.studio.model_catalog import DATASET_CATEGORY_DEFAULTS, normalize_category
+
+    cat = normalize_category((category or "").strip() or None)
+    if not cat or cat not in DATASET_CATEGORY_DEFAULTS:
+        raise StudioStoreError(f"Unknown dataset category: {category}", 400)
+    defaults = DATASET_CATEGORY_DEFAULTS[cat]
+    task = str(defaults.get("task") or "detect")
+    default_names = list(defaults.get("class_names") or [])
+    with _lock:
+        path = dataset_dir(dataset_id) / "meta.json"
+        if not path.is_file():
+            raise StudioStoreError("Dataset not found.", 404)
+        meta = _read_json(path)
+        existing = [str(name) for name in (meta.get("class_names") or []) if str(name).strip()]
+        if class_names:
+            names = parse_class_names(class_names)
+        elif not existing or set(existing) in _stock_class_sets():
+            names = default_names
+        else:
+            from app.studio.dataset import foreign_stock_class_names, is_north_arrow_class
+
+            foreign = foreign_stock_class_names(cat)
+            names = list(default_names)
+            for name in existing:
+                key = " ".join(name.strip().lower().replace("_", " ").split())
+                if name in names:
+                    continue
+                if name in foreign or key in foreign:
+                    continue
+                if cat == "north_arrow" and is_north_arrow_class(name):
+                    continue
+                names.append(name)
+        meta["category"] = cat
+        meta["task"] = task
+        meta["class_names"] = names
+        meta["updated_at"] = _now()
+        _write_json(path, meta)
+    return _summarize(meta)
+
+
+def create_dataset(*, name: str, task: str, class_names: list[str], category: str | None = None) -> dict[str, Any]:
+    cleaned = name.strip() or "Untitled dataset"
+    if task not in {"detect", "segment", "pose"}:
+        raise StudioStoreError("Task must be detect, segment, or pose.")
+    if not class_names:
+        raise StudioStoreError("Add at least one class name.")
+    from app.studio.model_catalog import DATASET_CATEGORY_DEFAULTS, normalize_category
+
+    cat = normalize_category((category or "").strip() or None)
+    if category and not cat:
+        raise StudioStoreError(f"Unknown dataset category: {category}")
     if cat and cat not in DATASET_CATEGORY_DEFAULTS:
         raise StudioStoreError(f"Unknown dataset category: {category}")
+    if cat == "north_arrow":
+        task = str(DATASET_CATEGORY_DEFAULTS[cat].get("task") or "pose")
     dataset_id = str(uuid4())
     meta = {
         "id": dataset_id,
@@ -960,6 +1028,7 @@ def create_dataset_tiles(
     min_side: int | None = None,
     only_labeled: bool = False,
     replace_existing: bool = False,
+    skip_unlabeled: bool = False,
 ) -> dict[str, Any]:
     """
     PDF/image pages → overlapping square tiles sized for fine-tune ``imgsz``.
@@ -1008,6 +1077,8 @@ def create_dataset_tiles(
     created = 0
     skipped_small = 0
     skipped_no_drawing = 0
+    full_page_fallback = 0
+    skipped_unlabeled = 0
     labeled_tiles = 0
     for page in sources:
         try:
@@ -1024,10 +1095,16 @@ def create_dataset_tiles(
             labels = None
         shapes = list((labels or {}).get("shapes") or []) if labels else []
         rgb = np.asarray(image, dtype=np.uint8)
-        crop_box = resolve_drawing_crop_xyxy(w, h, shapes=shapes, rgb=rgb)
+        crop_box = resolve_drawing_crop_xyxy(
+            w,
+            h,
+            shapes=shapes,
+            rgb=rgb,
+            studio_infer=True,
+        )
         if crop_box is None:
-            skipped_no_drawing += 1
-            continue
+            crop_box = (0, 0, w, h)
+            full_page_fallback += 1
         cx0, cy0, cx1, cy1 = crop_box
         crop_w = cx1 - cx0
         crop_h = cy1 - cy0
@@ -1069,6 +1146,9 @@ def create_dataset_tiles(
                         "imageWidth": size,
                         "imageHeight": size,
                     }
+            if skip_unlabeled and not tile_labels:
+                skipped_unlabeled += 1
+                continue
             add_page(
                 dataset_id,
                 image_bytes=buf.getvalue(),
@@ -1088,9 +1168,204 @@ def create_dataset_tiles(
     summary["tiles_labeled"] = labeled_tiles
     summary["tiles_skipped_small"] = skipped_small
     summary["tiles_skipped_no_drawing"] = skipped_no_drawing
+    summary["tiles_full_page_fallback"] = full_page_fallback
+    summary["tiles_skipped_unlabeled"] = skipped_unlabeled
     summary["tile_size"] = size
     summary["tile_overlap"] = overlap
     summary["tile_min_side"] = gate
+    return summary
+
+
+def export_annotation_crops(
+    dataset_id: str,
+    *,
+    class_labels: list[str] | None = None,
+    page_ids: list[str] | None = None,
+    selections: list[dict[str, Any]] | None = None,
+    target_name: str | None = None,
+    category: str | None = None,
+    padding_frac: float = 0.25,
+    min_side_px: int = 64,
+    square: bool = True,
+) -> dict[str, Any]:
+    """
+    Crop labelled regions into a new dataset for specialist fine-tune.
+
+    Use ``class_labels`` to take every matching shape on the source pages, or
+    ``selections`` for explicit LabelMe shapes (e.g. the current Annotate selection).
+    """
+    from app.studio.export_crops import (
+        infer_crop_dataset_meta,
+        norm_label,
+        padded_crop_xyxy,
+        remap_shape_to_crop,
+        shape_bbox,
+    )
+
+    source = get_dataset(dataset_id)
+    wanted = {norm_label(name) for name in (class_labels or []) if str(name).strip()}
+    explicit = [item for item in (selections or []) if isinstance(item, dict)]
+    if not wanted and not explicit:
+        raise StudioStoreError("Choose at least one class, or select annotations to crop.", 400)
+
+    page_filter = {str(pid) for pid in (page_ids or []) if str(pid).strip()}
+    pages = [
+        page
+        for page in list(source.get("pages") or [])
+        if str(page.get("kind") or "image") != "tile"
+        and (not page_filter or str(page.get("id")) in page_filter)
+    ]
+    if not pages:
+        raise StudioStoreError("No source pages to crop. Convert PDFs to images first.", 400)
+
+    by_page: dict[str, list[dict[str, Any]]] = {}
+    if explicit:
+        for item in explicit:
+            page_id = str(item.get("pageId") or item.get("page_id") or "").strip()
+            if not page_id:
+                continue
+            points = item.get("points")
+            if not isinstance(points, list) or not points:
+                continue
+            label = str(item.get("label") or "").strip() or "object"
+            shape = {
+                "label": label,
+                "shape_type": str(item.get("shapeType") or item.get("shape_type") or "polygon"),
+                "points": points,
+                "group_id": None,
+                "description": "",
+                "flags": {},
+            }
+            by_page.setdefault(page_id, []).append(shape)
+
+    crops: list[tuple[dict[str, Any], bytes, dict[str, Any]]] = []
+    used_labels: set[str] = set()
+    pages_used = 0
+    skipped_empty = 0
+
+    for page in pages:
+        page_id = str(page.get("id"))
+        shapes: list[dict[str, Any]] = []
+        if page_id in by_page:
+            shapes = list(by_page[page_id])
+        elif wanted:
+            try:
+                labels = read_page_labels(dataset_id, page)
+            except StudioStoreError:
+                labels = None
+            for shape in list((labels or {}).get("shapes") or []):
+                if not isinstance(shape, dict):
+                    continue
+                if norm_label(str(shape.get("label") or "")) in wanted:
+                    shapes.append(shape)
+        if not shapes:
+            skipped_empty += 1
+            continue
+
+        try:
+            png_bytes, width, height = read_page_png(dataset_id, page)
+        except StudioStoreError:
+            skipped_empty += 1
+            continue
+        image = Image.open(BytesIO(png_bytes)).convert("RGB")
+        img_w, img_h = image.size
+        if img_w <= 0 or img_h <= 0:
+            skipped_empty += 1
+            continue
+
+        split = str(page.get("split") or "train")
+        stem = Path(str(page.get("source_name") or page.get("id") or "page")).stem
+        page_crops = 0
+        for idx, shape in enumerate(shapes):
+            bbox = shape_bbox(list(shape.get("points") or []))
+            if bbox is None:
+                continue
+            x0, y0, x1, y1 = padded_crop_xyxy(
+                *bbox,
+                image_w=img_w,
+                image_h=img_h,
+                padding_frac=padding_frac,
+                min_side=min_side_px,
+                square=square,
+            )
+            crop = image.crop((x0, y0, x1, y1))
+            crop_w, crop_h = crop.size
+            remapped = remap_shape_to_crop(shape, x0=x0, y0=y0, crop_w=crop_w, crop_h=crop_h)
+            if remapped is None:
+                continue
+            label = str(remapped.get("label") or "object").strip() or "object"
+            used_labels.add(label)
+            buf = BytesIO()
+            crop.save(buf, format="PNG")
+            slug = "".join(ch if ch.isalnum() else "_" for ch in label).strip("_") or "label"
+            crop_labels = {
+                "version": "5.8.3",
+                "flags": {},
+                "shapes": [remapped],
+                "imagePath": f"{stem}_{slug}_{idx:03d}.png",
+                "imageWidth": crop_w,
+                "imageHeight": crop_h,
+            }
+            crops.append(
+                (
+                    {
+                        "source_name": f"{stem}_{slug}_{idx:03d}.png",
+                        "page_number": page_crops + 1,
+                        "split": split,
+                        "source_path": f"crops/{stem}",
+                    },
+                    buf.getvalue(),
+                    crop_labels,
+                )
+            )
+            page_crops += 1
+        if page_crops:
+            pages_used += 1
+        else:
+            skipped_empty += 1
+
+    if not crops:
+        raise StudioStoreError(
+            "No matching annotations to crop. Label the class on at least one page, or select overlays first.",
+            400,
+        )
+
+    inferred_cat, inferred_task = infer_crop_dataset_meta(
+        sorted(used_labels),
+        str(source.get("category") or "") or None,
+        str(source.get("task") or "") or None,
+    )
+    target_category = (category or "").strip() or inferred_cat
+    class_names = sorted(used_labels) or list(wanted) or ["object"]
+    source_name = str(source.get("name") or "dataset")
+    label_part = ", ".join(class_names[:3])
+    if len(class_names) > 3:
+        label_part += "…"
+    name = (target_name or "").strip() or f"{source_name} — {label_part} crops"
+
+    created = create_dataset(
+        name=name,
+        task=inferred_task,
+        class_names=class_names,
+        category=target_category,
+    )
+    for meta, image_bytes, labels in crops:
+        add_page(
+            created["id"],
+            image_bytes=image_bytes,
+            source_name=meta["source_name"],
+            page_number=int(meta["page_number"]),
+            labels=labels,
+            split=str(meta["split"]),
+            source_path=str(meta["source_path"]),
+            kind="image",
+        )
+
+    summary = get_dataset(created["id"])
+    summary["source_dataset_id"] = dataset_id
+    summary["crops_created"] = len(crops)
+    summary["pages_used"] = pages_used
+    summary["skipped_empty"] = skipped_empty
     return summary
 
 
@@ -1100,9 +1375,11 @@ def convert_dataset_to_yolo(dataset_id: str) -> dict[str, Any]:
 
     from app.yolo.convert_labelme import convert_labelme_dir
 
+    from app.studio.dataset import class_names_for_training, effective_train_task
+
     meta = get_dataset(dataset_id)
-    class_names = list(meta.get("class_names") or [])
-    task = str(meta.get("task") or "segment")
+    class_names = class_names_for_training(meta)
+    task = effective_train_task(meta)
     if not class_names:
         raise StudioStoreError("Dataset has no class names.")
 

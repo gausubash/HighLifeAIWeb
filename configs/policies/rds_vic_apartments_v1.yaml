@@ -1,0 +1,89 @@
+# Residential Design Standards — apartments (Victoria).
+# Better Apartments Design Standards (2017) + typical ADG dwelling-size bands.
+# Evaluated against extracted apartments. Statutory approval stays with the assessor.
+
+version: rds_vic_apartments_v1
+name: Residential Design Standards — Apartments (VIC)
+jurisdiction: VIC
+description: >
+  Apartment rules from Better Apartments Design Standards (functional layout,
+  private open space, storage, communal open space) and ADG dwelling-size bands.
+
+rules:
+  - code: RDS-APT-SIZE
+    name: Minimum internal apartment area
+    kind: apartment_min_internal
+    clause: ADG 4D / BADS dwelling size
+    severity: fail
+    requires_scale: true
+    by_bedrooms: { "0": 35, "1": 50, "2": 70, "3": 90 }
+    explanation: "{label}: internal {measured} m² is below {required} m² for a {beds}-bed dwelling."
+
+  - code: RDS-BED-MIN
+    name: Minimum bedroom area
+    kind: apartment_min_bedroom
+    clause: BADS B24 / ADG 4E
+    severity: fail
+    requires_scale: true
+    min_area_m2: 9
+    min_dimension_m: 3
+    explanation: "{label} bedroom {measured} m² is below the {required} m² minimum."
+
+  - code: RDS-LIVING-MIN
+    name: Minimum living area
+    kind: apartment_min_living
+    clause: BADS B24 / ADG 4D
+    severity: fail
+    requires_scale: true
+    by_bedrooms: { "0": 10, "1": 12, "2": 16, "3": 18 }
+    min_dimension_m: 3.3
+    explanation: "{label}: living {measured} m² is below {required} m² for a {beds}-bed dwelling."
+
+  - code: RDS-POS-MIN
+    name: Private open space
+    kind: apartment_min_pos
+    clause: BADS B27
+    severity: fail
+    requires_scale: true
+    by_bedrooms: { "0": 8, "1": 8, "2": 8, "3": 8 }
+    min_dimension_m: 1.8
+    explanation: "{label}: private open space {measured} m² is below {required} m²."
+
+  - code: RDS-BATH-MIN
+    name: Bathroom in each dwelling
+    kind: apartment_min_bathrooms
+    clause: BADS B24 functional layout
+    severity: fail
+    min_count: 1
+    explanation: "{label}: dwelling has {measured} bathroom(s); {required} required."
+
+  - code: RDS-STORAGE
+    name: In-dwelling storage
+    kind: apartment_min_storage
+    clause: BADS B30
+    severity: fail
+    min_count: 1
+    explanation: "{label}: no dedicated store / robe space labelled on the plan."
+
+  - code: RDS-ASPECT-DUAL
+    name: Natural ventilation / dual aspect
+    kind: apartment_dual_aspect
+    clause: BADS daylight and natural ventilation
+    severity: fail
+    explanation: "{label}: windows are not on two sides (or north/window data is missing)."
+
+  - code: RDS-HAB-WINDOW
+    name: Habitable room has an exterior window
+    kind: habitable_has_window
+    clause: BADS daylight and natural ventilation
+    severity: fail
+    explanation: "{label}: habitable rooms without an exterior window: {missing}."
+
+  - code: RDS-COMMUNAL
+    name: Communal outdoor open space
+    kind: communal_open_space
+    clause: BADS B22
+    severity: fail
+    requires_scale: true
+    m2_per_dwelling: 2.5
+    explanation: "Communal outdoor space {measured} m² is below {required} m²."

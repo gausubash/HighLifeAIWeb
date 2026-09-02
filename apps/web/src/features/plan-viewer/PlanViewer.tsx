@@ -3,6 +3,7 @@
 import type { AnalysisResult, Polygon } from "@highlife/shared-types";
 import { useCallback, useRef } from "react";
 import { useViewerStore } from "./useViewerStore";
+import { zoomDeltaFromButton, zoomDeltaFromWheel } from "./viewBounds";
 import { formatArea, formatConfidence } from "@/lib/utils";
 
 interface PlanViewerProps {
@@ -39,8 +40,7 @@ export function PlanViewer({ result }: PlanViewerProps) {
   const handleWheel = useCallback(
     (e: React.WheelEvent) => {
       e.preventDefault();
-      const delta = e.deltaY > 0 ? -0.1 : 0.1;
-      setZoom(zoom + delta);
+      setZoom(zoom + zoomDeltaFromWheel(e.altKey, e.deltaY));
     },
     [zoom, setZoom]
   );
@@ -73,10 +73,20 @@ export function PlanViewer({ result }: PlanViewerProps) {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-slate-200 bg-white px-3 py-2">
-        <button type="button" className="btn-secondary text-xs" onClick={() => setZoom(zoom + 0.2)}>
+        <button
+          type="button"
+          className="btn-secondary text-xs"
+          title="Zoom in (Alt for faster)"
+          onClick={(e) => setZoom(zoom + zoomDeltaFromButton(e.altKey, 1))}
+        >
           Zoom in
         </button>
-        <button type="button" className="btn-secondary text-xs" onClick={() => setZoom(zoom - 0.2)}>
+        <button
+          type="button"
+          className="btn-secondary text-xs"
+          title="Zoom out (Alt for faster)"
+          onClick={(e) => setZoom(zoom + zoomDeltaFromButton(e.altKey, -1))}
+        >
           Zoom out
         </button>
         <button type="button" className="btn-secondary text-xs" onClick={resetView}>
@@ -98,13 +108,14 @@ export function PlanViewer({ result }: PlanViewerProps) {
       >
         <div className="absolute inset-0 flex items-center justify-center">
           <div
+            className="shrink-0"
             style={{
-              width: `${page.widthPx}px`,
-              height: `${page.heightPx}px`,
-              maxWidth: "100%",
-              maxHeight: "100%",
-              transform: `translate(${panX}px, ${panY}px) scale(${zoom})`,
-              transformOrigin: "center center",
+              width: page.widthPx * zoom,
+              height: page.heightPx * zoom,
+              minWidth: page.widthPx * zoom,
+              minHeight: page.heightPx * zoom,
+              flex: "0 0 auto",
+              transform: `translate(${panX}px, ${panY}px)`,
               position: "relative",
             }}
           >
@@ -124,6 +135,8 @@ export function PlanViewer({ result }: PlanViewerProps) {
               height="100%"
               role="img"
               aria-label="Floor plan viewer"
+              shapeRendering="geometricPrecision"
+              textRendering="geometricPrecision"
               style={{
                 position: "absolute",
                 inset: 0,

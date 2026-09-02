@@ -168,7 +168,13 @@ def build_scene_graph(
 
     meta = dict(sheet_meta or {})
     from app.pipeline.geometry import derive_relationships
+    from app.pipeline.unit_infer import infer_and_merge_units
 
+    entities = infer_and_merge_units(
+        entities,
+        width_px=result.width_px,
+        height_px=result.height_px,
+    )
     relationships = derive_relationships(entities)
     graph = {
         "schemaVersion": "1.0.0",

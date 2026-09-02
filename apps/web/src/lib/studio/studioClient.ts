@@ -71,10 +71,57 @@ export type CreateTilesResult = MlDataset & {
   tiles_labeled?: number;
   tiles_skipped_small?: number;
   tiles_skipped_no_drawing?: number;
+  tiles_full_page_fallback?: number;
+  tiles_skipped_unlabeled?: number;
   tile_size?: number;
   tile_overlap?: number;
   tile_min_side?: number;
 };
+
+export type ExportCropsResult = MlDataset & {
+  source_dataset_id?: string;
+  crops_created?: number;
+  pages_used?: number;
+  skipped_empty?: number;
+};
+
+export type ExportCropSelection = {
+  pageId: string;
+  label: string;
+  points: number[][];
+  shapeType?: string;
+};
+
+export async function exportAnnotationCrops(
+  datasetId: string,
+  options: {
+    classLabels?: string[];
+    pageIds?: string[];
+    selections?: ExportCropSelection[];
+    targetName?: string;
+    category?: string;
+    paddingFrac?: number;
+    minSidePx?: number;
+    square?: boolean;
+  },
+): Promise<ExportCropsResult> {
+  return readJson<ExportCropsResult>(
+    await studioFetch(`/v1/studio/datasets/${datasetId}/export-crops`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        classLabels: options.classLabels,
+        pageIds: options.pageIds,
+        selections: options.selections,
+        targetName: options.targetName,
+        category: options.category,
+        paddingFrac: options.paddingFrac ?? 0.25,
+        minSidePx: options.minSidePx ?? 64,
+        square: options.square ?? true,
+      }),
+    }),
+  );
+}
 
 export async function createDatasetTiles(
   datasetId: string,
@@ -84,6 +131,7 @@ export async function createDatasetTiles(
     minSide?: number | null;
     onlyLabeled?: boolean;
     replaceExisting?: boolean;
+    skipUnlabeled?: boolean;
   } = {},
 ): Promise<CreateTilesResult> {
   return readJson<CreateTilesResult>(
@@ -96,6 +144,7 @@ export async function createDatasetTiles(
         minSide: options.minSide ?? null,
         onlyLabeled: options.onlyLabeled ?? false,
         replaceExisting: options.replaceExisting ?? true,
+        skipUnlabeled: options.skipUnlabeled ?? false,
       }),
     }),
   );
@@ -134,6 +183,19 @@ export async function updateDatasetClassNames(
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ classNames }),
+    }),
+  );
+}
+
+export async function updateDatasetPurpose(
+  datasetId: string,
+  category: string,
+): Promise<MlDataset> {
+  return readJson<MlDataset>(
+    await studioFetch(`/v1/studio/datasets/${datasetId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ category }),
     }),
   );
 }
@@ -263,12 +325,14 @@ export async function saveDatasetPageLabels(
   datasetId: string,
   pageId: string,
   labels: unknown,
+  options?: { keepalive?: boolean },
 ): Promise<StudioPage> {
   return readJson<StudioPage>(
     await studioFetch(`/v1/studio/datasets/${datasetId}/pages/${pageId}/labels`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(labels),
+      keepalive: options?.keepalive === true,
     }),
   );
 }
@@ -284,8 +348,22 @@ export async function listJobs(): Promise<MlTrainingJob[]> {
   return body.jobs ?? [];
 }
 
-export function studioJobPreviewUrl(jobId: string, cacheKey?: string | number | null): string {
+export function studioJobPreviewUrl(
+  jobId: string,
+  cacheKey?: string | number | null,
+  opts?: { epoch?: number | null; kind?: "pred" | "gt" },
+): string {
   const base = `${getInferenceApiBaseUrl()}/v1/studio/jobs/${jobId}/preview.png`;
+  const q = new URLSearchParams();
+  if (cacheKey != null && cacheKey !== "") q.set("v", String(cacheKey));
+  if (opts?.epoch != null) q.set("epoch", String(opts.epoch));
+  if (opts?.kind === "gt") q.set("kind", "gt");
+  const qs = q.toString();
+  return qs ? `${base}?${qs}` : base;
+}
+
+export function studioJobPlotUrl(jobId: string, name: string, cacheKey?: string | number | null): string {
+  const base = `${getInferenceApiBaseUrl()}/v1/studio/jobs/${jobId}/plots/${encodeURIComponent(name)}`;
   return cacheKey != null && cacheKey !== "" ? `${base}?v=${encodeURIComponent(String(cacheKey))}` : base;
 }
 
@@ -295,6 +373,7 @@ export type StudioBaseModel = {
   task: StudioTask;
   family: string;
   category?: string;
+  categories?: string[];
   description: string;
   runnable?: boolean;
   ready?: boolean;

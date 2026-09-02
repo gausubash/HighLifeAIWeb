@@ -7,6 +7,11 @@
   ],
   "scripts": {
     "dev": "npm run dev -w @highlife/web",
+    "dev:stack": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dev.ps1",
+    "data:start": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-local-data.ps1",
+    "data:stop": "npx supabase stop",
+    "data:status": "npx supabase status",
+    "data:env": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/write-local-env.ps1",
     "build": "npm run build -w @highlife/web",
     "lint": "npm run lint -w @highlife/web",
     "typecheck": "npm run typecheck --workspaces --if-present",

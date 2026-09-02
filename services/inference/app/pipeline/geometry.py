@@ -233,7 +233,63 @@ def derive_relationships(
                     method=method,
                 )
 
+    for unit in units:
+        uattrs = unit.get("attributes") or {}
+        unit_label = str(uattrs.get("ocrUnitId") or uattrs.get("label") or "")
+        if unit_label:
+            add(
+                "room_label_assignment",
+                str(unit["id"]),
+                str(unit["id"]),
+                label=unit_label,
+                source="unit",
+            )
+        contained = [r for r in rels if r.get("kind") == "unit_contains_room" and str(r.get("fromId")) == str(unit["id"])]
+        for rel in contained:
+            add(
+                "room_label_assignment",
+                str(rel["toId"]),
+                str(unit["id"]),
+                label=unit_label or str((unit.get("attributes") or {}).get("label") or ""),
+                source="unit_contains_room",
+            )
+
     return rels
+
+
+def _is_unit_entrance(door: dict[str, Any]) -> bool:
+    attrs = door.get("attributes") or {}
+    if str(attrs.get("openingType") or "") == "unit_entrance":
+        return True
+    return "main door" in _norm(str(attrs.get("label") or ""))
+
+
+def _doors_in_unit(
+    unit: dict[str, Any],
+    doors: list[dict[str, Any]],
+    *,
+    pad_px: float = 24.0,
+) -> list[dict[str, Any]]:
+    ubox = _expand(_bbox(unit), pad_px)
+    upoly = _poly(unit)
+    hits: list[dict[str, Any]] = []
+    for door in doors:
+        cx, cy = _centroid(door)
+        if upoly and _point_in_poly(cx, cy, upoly):
+            hits.append(door)
+        elif _point_in_bbox(cx, cy, ubox):
+            hits.append(door)
+    return hits
+
+
+def _entrance_ids_for_unit(unit: dict[str, Any], doors: list[dict[str, Any]]) -> list[str]:
+    in_unit = _doors_in_unit(unit, doors)
+    attributed = list((unit.get("attributes") or {}).get("entranceIds") or [])
+    if attributed:
+        return [str(x) for x in attributed]
+    entrances = [d for d in in_unit if _is_unit_entrance(d)]
+    chosen = entrances if entrances else in_unit[:1]
+    return [str(d["id"]) for d in chosen]
 
 
 def units_from_entities(
@@ -278,7 +334,7 @@ def units_from_entities(
                     "geometry": poly,
                     "area_m2": area,
                     "space_ids": space_ids,
-                    "entrance_ids": [str(d["id"]) for d in doors][:1],
+                    "entrance_ids": _entrance_ids_for_unit(unit, doors),
                     "confidence": float(unit.get("confidence") or 0.7),
                     "review_required": str(unit.get("status")) == "predicted",
                 }
@@ -294,7 +350,8 @@ def units_from_entities(
             "geometry": [[0, 0], [width_px, 0], [width_px, height_px], [0, height_px]],
             "area_m2": sum(area_by_room.get(sid) or 0 for sid in space_ids) or None,
             "space_ids": space_ids,
-            "entrance_ids": [str(d["id"]) for d in doors][:1],
+            "entrance_ids": [str(d["id"]) for d in doors if _is_unit_entrance(d)][:1]
+            or [str(d["id"]) for d in doors][:1],
             "confidence": 0.6,
             "review_required": any(str(r.get("status")) == "predicted" for r in rooms),
         }

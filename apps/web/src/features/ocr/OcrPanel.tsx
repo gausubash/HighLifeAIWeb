@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import type { ReactNode } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   DET_LIMIT_OPTIONS,
   OCR_LANG_OPTIONS,
@@ -10,6 +11,8 @@ import {
 } from "./useOcrSettingsStore";
 import type { PageOcrMeta } from "@highlife/shared-types";
 import { formatConfidence } from "@/lib/utils";
+import type { PdfGraphicsKind } from "@/lib/pdf/classifyPdfGraphics";
+import type { OcrLineSource } from "@/lib/ocr/removeOcrLine";
 
 export interface OcrLineItem {
   text?: string | null;
@@ -33,12 +36,25 @@ interface OcrPanelProps {
   } | null;
   ocrNotice?: string | null;
   ocrError?: string | null;
+  graphicsKind?: PdfGraphicsKind | string | null;
   onRunPageOcr?: (profile?: "default" | "dense") => void;
   onRunTitleBlockOcr?: () => void;
   onRunDrawingAreaOcr?: () => void;
   onRunAllPagesOcr?: () => void;
+  onRunOcr?: (opts: { title: boolean; drawing: boolean; allPages: boolean }) => void;
+  onExtractPdfText?: (opts: {
+    title: boolean;
+    drawing: boolean;
+    allPages: boolean;
+  }) => void;
   onCancelOcr?: () => void;
-  onApplyDetectedScale?: () => void;
+  onApplyDetectedScale?: () => boolean | void;
+  /** Active drawing scale from calibration / declaration (shown in OCR tab). */
+  activeScaleLabel?: string | null;
+  /** How the active scale was set (title block, manual, calibrate…). */
+  scaleMethod?: string | null;
+  onDeleteOcrLine?: (source: OcrLineSource, index: number) => void;
+  onClearOcrLines?: (source: TextBoxViewMode) => void;
 }
 
 type TextBoxViewMode = "all" | "title_block" | "drawing";
@@ -67,6 +83,29 @@ function parseOcrLine(item: unknown): OcrLineItem | null {
   return null;
 }
 
+function formatOcrBbox(bbox: [number, number][] | null | undefined): string | null {
+  if (!bbox || bbox.length < 2) return null;
+  const xs = bbox.map((p) => Number(p[0])).filter((n) => Number.isFinite(n));
+  const ys = bbox.map((p) => Number(p[1])).filter((n) => Number.isFinite(n));
+  if (!xs.length || !ys.length) return null;
+  const x0 = Math.min(...xs);
+  const y0 = Math.min(...ys);
+  const w = Math.max(...xs) - x0;
+  const h = Math.max(...ys) - y0;
+  return `${Math.round(x0)},${Math.round(y0)}  ${Math.round(w)}×${Math.round(h)}`;
+}
+
+function Row({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="flex items-center gap-1">
+      <span className="w-12 shrink-0 text-xs font-semibold uppercase tracking-wider text-slate-400">
+        {label}
+      </span>
+      <div className="min-w-0 flex-1">{children}</div>
+    </div>
+  );
+}
+
 export function OcrPanel({
   pageNumber,
   pageCount,
@@ -78,18 +117,32 @@ export function OcrPanel({
   ocrProgress,
   ocrNotice,
   ocrError,
+  graphicsKind,
   onRunPageOcr,
   onRunTitleBlockOcr,
   onRunDrawingAreaOcr,
   onRunAllPagesOcr,
+  onRunOcr,
+  onExtractPdfText,
   onCancelOcr,
   onApplyDetectedScale,
+  activeScaleLabel,
+  scaleMethod,
+  onDeleteOcrLine,
+  onClearOcrLines,
 }: OcrPanelProps) {
   const [filterText, setFilterText] = useState("");
-  const [minConfFilter, setMinConfFilter] = useState(0);
+  const [scaleApplyState, setScaleApplyState] = useState<"idle" | "ok" | "fail">("idle");
+
+  useEffect(() => {
+    setScaleApplyState("idle");
+  }, [ocrMeta?.scaleText, pageNumber]);
   const [copied, setCopied] = useState<string | null>(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [textBoxView, setTextBoxView] = useState<TextBoxViewMode>("all");
+  const [doTitle, setDoTitle] = useState(true);
+  const [doDrawing, setDoDrawing] = useState(true);
+  const [doAllPages, setDoAllPages] = useState(false);
 
   const {
     useDocOrientationClassify,
@@ -104,6 +157,8 @@ export function OcrPanel({
     pipelineVersion,
     useLayoutDetection,
     vlMaxSide,
+    tileTitleBlock,
+    tileDrawing,
     setUseDocOrientationClassify,
     setUseDocUnwarping,
     setUseTextlineOrientation,
@@ -116,12 +171,18 @@ export function OcrPanel({
     setPipelineVersion,
     setUseLayoutDetection,
     setVlMaxSide,
+    setTileTitleBlock,
+    setTileDrawing,
     resetDefaults,
   } = useOcrSettingsStore();
   const isVl = backend === "vl";
+  const digitalPdf =
+    graphicsKind === "vector" || graphicsKind === "hybrid" || graphicsKind === "unknown" || graphicsKind == null;
+  const pdfTextProvider =
+    ocrMeta?.provider === "pdf-text" || drawingOcrMeta?.provider === "pdf-text";
 
   const titleLines = useMemo<OcrLineItem[]>(() => {
-    const raw = (ocrLines && ocrLines.length > 0) ? ocrLines : (ocrMeta?.lines ?? []);
+    const raw = ocrLines && ocrLines.length > 0 ? ocrLines : (ocrMeta?.lines ?? []);
     const parsed = raw.map(parseOcrLine).filter((l): l is OcrLineItem => l !== null);
     if (parsed.length > 0) return parsed;
     if (ocrMeta?.textHint?.trim()) {
@@ -148,18 +209,7 @@ export function OcrPanel({
     return [];
   }, [drawingOcrMeta]);
 
-  const allLines = useMemo<OcrLineItem[]>(() => {
-    const combined: OcrLineItem[] = [];
-    titleLines.forEach((l) => combined.push(l));
-    drawingLines.forEach((l) => combined.push(l));
-    return combined;
-  }, [titleLines, drawingLines]);
-
-  const activeLines = useMemo<OcrLineItem[]>(() => {
-    if (textBoxView === "title_block") return titleLines;
-    if (textBoxView === "drawing") return drawingLines;
-    return allLines.length > 0 ? allLines : titleLines.length > 0 ? titleLines : drawingLines;
-  }, [textBoxView, titleLines, drawingLines, allLines]);
+  const allLines = useMemo<OcrLineItem[]>(() => [...titleLines, ...drawingLines], [titleLines, drawingLines]);
 
   const fullTextContent = useMemo<string>(() => {
     const linesToFormat =
@@ -172,690 +222,393 @@ export function OcrPanel({
             : titleLines.length > 0
               ? titleLines
               : drawingLines;
-
-    const formatted = linesToFormat
-      .map((l) => l.text?.trim())
-      .filter(Boolean)
-      .join("\n");
-
+    const formatted = linesToFormat.map((l) => l.text?.trim()).filter(Boolean).join("\n");
     if (formatted) return formatted;
-
-    if (textBoxView === "title_block" && ocrMeta?.textHint?.trim()) {
-      return ocrMeta.textHint.trim();
-    }
-    if (textBoxView === "drawing" && drawingOcrMeta?.textHint?.trim()) {
-      return drawingOcrMeta.textHint.trim();
-    }
+    if (textBoxView === "title_block" && ocrMeta?.textHint?.trim()) return ocrMeta.textHint.trim();
+    if (textBoxView === "drawing" && drawingOcrMeta?.textHint?.trim()) return drawingOcrMeta.textHint.trim();
     if (textBoxView === "all") {
       const parts = [ocrMeta?.textHint?.trim(), drawingOcrMeta?.textHint?.trim()].filter(Boolean);
       if (parts.length > 0) return parts.join("\n\n");
     }
-
     return "";
   }, [textBoxView, titleLines, drawingLines, allLines, ocrMeta?.textHint, drawingOcrMeta?.textHint]);
 
-  const filteredLines = useMemo<OcrLineItem[]>(() => {
+  const activeLineRefs = useMemo(() => {
+    const title = titleLines.map((line, index) => ({
+      line,
+      source: "title_block" as const,
+      index,
+    }));
+    const drawing = drawingLines.map((line, index) => ({
+      line,
+      source: "drawing" as const,
+      index,
+    }));
+    if (textBoxView === "title_block") return title;
+    if (textBoxView === "drawing") return drawing;
+    return [...title, ...drawing];
+  }, [textBoxView, titleLines, drawingLines]);
+
+  const filteredLineRefs = useMemo(() => {
     const q = filterText.trim().toLowerCase();
-    return activeLines.filter((l) => {
-      const txt = (l.text ?? "").toLowerCase();
-      const conf = l.confidence ?? 0;
-      if (minConfFilter > 0 && conf < minConfFilter) return false;
+    return activeLineRefs.filter(({ line }) => {
+      const txt = (line.text ?? "").toLowerCase();
       if (q && !txt.includes(q)) return false;
-      return Boolean(l.text?.trim());
+      return Boolean(line.text?.trim());
     });
-  }, [activeLines, filterText, minConfFilter]);
+  }, [activeLineRefs, filterText]);
 
-  const handleCopyTextBox = () => {
-    if (!fullTextContent) return;
-    navigator.clipboard.writeText(fullTextContent);
-    setCopied("textbox");
-    setTimeout(() => setCopied(null), 2000);
+  const copy = (key: string, text: string) => {
+    if (!text) return;
+    void navigator.clipboard.writeText(text);
+    setCopied(key);
+    window.setTimeout(() => setCopied(null), 1600);
   };
 
-  const handleCopyLines = () => {
-    const textToCopy = filteredLines
-      .map((l) => l.text?.trim())
-      .filter(Boolean)
-      .join("\n");
-    if (!textToCopy) return;
-    navigator.clipboard.writeText(textToCopy);
-    setCopied("lines");
-    setTimeout(() => setCopied(null), 2000);
+  const pageChecked = doTitle && doDrawing;
+
+  const runOcr = () => {
+    if (!doTitle && !doDrawing) return;
+    if (onRunOcr) {
+      onRunOcr({ title: doTitle, drawing: doDrawing, allPages: doAllPages });
+      return;
+    }
+    if (doAllPages && doTitle && doDrawing) {
+      onRunAllPagesOcr?.();
+      return;
+    }
+    if (doTitle) onRunTitleBlockOcr?.();
+    if (doDrawing) onRunDrawingAreaOcr?.();
   };
 
-  const handleCopyJson = () => {
-    const data = {
-      sheet: ocrMeta,
-      drawingOcr: drawingOcrMeta,
-      titleLines,
-      drawingLines,
-    };
-    navigator.clipboard.writeText(JSON.stringify(data, null, 2));
-    setCopied("json");
-    setTimeout(() => setCopied(null), 2000);
-  };
+  const progressPct = ocrProgress
+    ? Math.min(100, Math.round((ocrProgress.current / Math.max(1, ocrProgress.total)) * 100))
+    : 0;
 
   return (
-    <div className="space-y-4 pb-6 text-xs text-slate-700">
-      {/* Run OCR Engine Controls */}
-      <div className="space-y-2 rounded-lg border border-teal-200 bg-teal-50/40 p-3">
-        <div className="flex items-center justify-between">
-          <span className="font-semibold uppercase tracking-wider text-teal-900">
-            PaddleOCR Engine
-          </span>
+    <div className="space-y-3 text-[13px] text-slate-700">
+      <div className="space-y-1.5">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
           {ocrBusy ? (
-            <span className="inline-flex items-center gap-1 rounded bg-teal-100 px-1.5 py-0.5 text-[10px] font-medium text-teal-800">
-              <span className="h-1.5 w-1.5 animate-ping rounded-full bg-teal-600" />
-              Running...
-            </span>
+            <button type="button" className="btn-compact-secondary" onClick={() => onCancelOcr?.()}>
+              Cancel
+            </button>
           ) : (
-            <span className="text-[11px] text-teal-700">
-              Page {pageNumber} of {pageCount}
-            </span>
-          )}
-        </div>
-
-        {ocrBusy && ocrProgress ? (
-          <div className="space-y-1 pt-1">
-            <div className="flex justify-between text-[11px] text-teal-800">
-              <span>{ocrStatus ?? "Extracting text..."}</span>
-              <span>
-                {Math.round((ocrProgress.current / Math.max(1, ocrProgress.total)) * 100)}%
-              </span>
-            </div>
-            <div className="h-1.5 w-full overflow-hidden rounded-full bg-teal-200">
-              <div
-                className="h-full bg-teal-600 transition-all duration-200"
-                style={{
-                  width: `${Math.min(100, Math.round((ocrProgress.current / Math.max(1, ocrProgress.total)) * 100))}%`,
-                }}
-              />
-            </div>
-          </div>
-        ) : null}
-
-        {ocrError ? (
-          <p className="rounded border border-red-200 bg-red-50 p-2 text-[11px] text-red-700">
-            {ocrError}
-          </p>
-        ) : null}
-
-        {ocrNotice ? (
-          <p className="rounded border border-amber-200 bg-amber-50 p-2 text-[11px] text-amber-800">
-            {ocrNotice}
-          </p>
-        ) : null}
-
-        <div className="grid grid-cols-2 gap-1.5 pt-1">
-          <button
-            type="button"
-            disabled={ocrBusy}
-            onClick={() => onRunPageOcr?.("default")}
-            className="rounded bg-teal-700 px-2.5 py-1.5 font-medium text-white shadow-sm hover:bg-teal-800 disabled:opacity-50"
-          >
-            Run Page OCR
-          </button>
-          <button
-            type="button"
-            disabled={ocrBusy}
-            onClick={() => onRunTitleBlockOcr?.()}
-            className="rounded border border-teal-600 bg-white px-2.5 py-1.5 font-medium text-teal-800 hover:bg-teal-50 disabled:opacity-50"
-          >
-            OCR Title Block
-          </button>
-          <button
-            type="button"
-            disabled={ocrBusy}
-            onClick={() => onRunDrawingAreaOcr?.()}
-            className="rounded border border-slate-300 bg-white px-2.5 py-1.5 font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-          >
-            OCR Drawing Area
-          </button>
-          <button
-            type="button"
-            disabled={ocrBusy}
-            onClick={() => onRunAllPagesOcr?.()}
-            className="rounded border border-slate-300 bg-white px-2.5 py-1.5 font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-          >
-            OCR All Pages
-          </button>
-        </div>
-
-        {ocrBusy && onCancelOcr ? (
-          <button
-            type="button"
-            onClick={onCancelOcr}
-            className="w-full rounded border border-red-300 bg-red-50 px-2.5 py-1 text-[11px] font-medium text-red-700 hover:bg-red-100"
-          >
-            Cancel OCR
-          </button>
-        ) : null}
-      </div>
-
-      {/* Detected OCR Text Box Group */}
-      <div className="space-y-2 rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
-        <div className="flex items-center justify-between">
-          <span className="font-semibold text-slate-800">
-            Detected OCR Text Box
-          </span>
-          <div className="flex items-center gap-1.5">
-            <button
-              type="button"
-              onClick={handleCopyTextBox}
-              disabled={!fullTextContent}
-              className="rounded border border-teal-600 bg-teal-50 px-2 py-0.5 text-[10px] font-semibold text-teal-800 hover:bg-teal-100 disabled:opacity-40"
-            >
-              {copied === "textbox" ? "Copied!" : "Copy Text"}
-            </button>
-            <button
-              type="button"
-              onClick={handleCopyJson}
-              className="rounded border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-medium text-slate-700 hover:bg-slate-100"
-            >
-              {copied === "json" ? "Copied JSON!" : "JSON"}
-            </button>
-          </div>
-        </div>
-
-        {/* Text Box Source Filter Tabs */}
-        <div className="flex gap-1 rounded bg-slate-100 p-0.5 text-[11px]">
-          <button
-            type="button"
-            onClick={() => setTextBoxView("all")}
-            className={`flex-1 rounded px-2 py-1 font-medium transition-colors ${
-              textBoxView === "all"
-                ? "bg-white text-slate-800 shadow-sm"
-                : "text-slate-600 hover:text-slate-900"
-            }`}
-          >
-            All Text ({allLines.length})
-          </button>
-          <button
-            type="button"
-            onClick={() => setTextBoxView("title_block")}
-            className={`flex-1 rounded px-2 py-1 font-medium transition-colors ${
-              textBoxView === "title_block"
-                ? "bg-white text-slate-800 shadow-sm"
-                : "text-slate-600 hover:text-slate-900"
-            }`}
-          >
-            Title Block ({titleLines.length})
-          </button>
-          <button
-            type="button"
-            onClick={() => setTextBoxView("drawing")}
-            className={`flex-1 rounded px-2 py-1 font-medium transition-colors ${
-              textBoxView === "drawing"
-                ? "bg-white text-slate-800 shadow-sm"
-                : "text-slate-600 hover:text-slate-900"
-            }`}
-          >
-            Drawing Area ({drawingLines.length})
-          </button>
-        </div>
-
-        {/* Multi-line Raw Text Box */}
-        <div className="relative">
-          <textarea
-            readOnly
-            value={fullTextContent}
-            placeholder="No text detected on this page yet. Run OCR above to populate text box."
-            rows={7}
-            className="w-full resize-y rounded border border-slate-200 bg-slate-50/70 p-2.5 font-mono text-[11px] leading-relaxed text-slate-800 focus:border-teal-500 focus:bg-white focus:outline-none"
-          />
-          {fullTextContent ? (
-            <div className="mt-1 flex items-center justify-between text-[10px] text-slate-400">
-              <span>
-                {fullTextContent.split("\n").filter(Boolean).length} lines ·{" "}
-                {fullTextContent.split(/\s+/).filter(Boolean).length} words ·{" "}
-                {fullTextContent.length} chars
-              </span>
-              <span className="text-teal-700 font-medium">Selectable & copyable</span>
-            </div>
-          ) : null}
-        </div>
-      </div>
-
-      {/* Detected Sheet Metadata Group */}
-      <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50/70 p-3">
-        <span className="font-semibold uppercase tracking-wider text-slate-700">
-          Detected Sheet Metadata
-        </span>
-
-        <div className="grid grid-cols-2 gap-2 text-xs">
-          <div className="rounded border border-slate-200 bg-white p-2">
-            <span className="block text-[10px] font-medium text-slate-400">Floor Level</span>
-            <span className="font-semibold text-slate-800">
-              {ocrMeta?.levelName || "Not detected"}
-            </span>
-          </div>
-
-          <div className="rounded border border-slate-200 bg-white p-2">
-            <span className="block text-[10px] font-medium text-slate-400">Scale Ratio</span>
-            <div className="flex items-center justify-between">
-              <span className="font-semibold text-slate-800">
-                {ocrMeta?.scaleText || "Not detected"}
-              </span>
-              {ocrMeta?.scaleText && onApplyDetectedScale ? (
+            <div className="btn-segment-group" role="group" aria-label="Extract text">
+              <button
+                type="button"
+                className="btn-segment"
+                disabled={
+                  (!doTitle && !doDrawing) ||
+                  (!onRunOcr && !onRunPageOcr && !onRunTitleBlockOcr && !onRunDrawingAreaOcr)
+                }
+                title={
+                  doAllPages
+                    ? `Scan title and/or drawing on all ${pageCount} pages`
+                    : `Scan title and/or drawing on page ${pageNumber}`
+                }
+                onClick={runOcr}
+              >
+                Run OCR
+              </button>
+              {onExtractPdfText ? (
                 <button
                   type="button"
-                  onClick={onApplyDetectedScale}
-                  className="rounded bg-teal-600 px-1.5 py-0.5 text-[10px] font-medium text-white hover:bg-teal-700 shadow-sm"
-                  title="Apply this OCR scale to page calibration"
+                  className="btn-segment"
+                  disabled={graphicsKind === "image" || (!doTitle && !doDrawing)}
+                  title={
+                    graphicsKind === "image"
+                      ? "This page is a raster image, not a digital PDF"
+                      : doAllPages
+                        ? `Read selectable PDF text in the checked Title / Drawing areas on all ${pageCount} pages`
+                        : `Read selectable PDF text in the checked Title / Drawing areas on page ${pageNumber}`
+                  }
+                  onClick={() =>
+                    onExtractPdfText({
+                      title: doTitle,
+                      drawing: doDrawing,
+                      allPages: doAllPages,
+                    })
+                  }
                 >
-                  Apply
+                  Digital PDF
                 </button>
               ) : null}
             </div>
-          </div>
-
-          <div className="col-span-2 rounded border border-slate-200 bg-white p-2">
-            <span className="block text-[10px] font-medium text-slate-400">Sheet Title</span>
-            <span className="font-medium text-slate-800">
-              {ocrMeta?.title || "Not detected"}
-            </span>
-          </div>
-
-          {ocrMeta?.unitIds && ocrMeta.unitIds.length > 0 ? (
-            <div className="col-span-2 rounded border border-slate-200 bg-white p-2">
-              <span className="block text-[10px] font-medium text-slate-400">
-                Detected Units ({ocrMeta.unitIds.length})
-              </span>
-              <div className="mt-1 flex flex-wrap gap-1">
-                {ocrMeta.unitIds.map((u) => (
-                  <span
-                    key={u}
-                    className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[10px] text-slate-700 border border-slate-200"
-                  >
-                    {u}
-                  </span>
-                ))}
-              </div>
-            </div>
-          ) : null}
+          )}
+          <label className="flex items-center gap-1 text-[13px] text-slate-700">
+            <input
+              type="checkbox"
+              className="accent-slate-900"
+              checked={pageChecked}
+              disabled={ocrBusy}
+              onChange={(e) => {
+                const next = e.target.checked;
+                setDoTitle(next);
+                setDoDrawing(next);
+              }}
+            />
+            Page
+          </label>
+          <label className="flex items-center gap-1 text-[13px] text-slate-700">
+            <input
+              type="checkbox"
+              className="accent-slate-900"
+              checked={doTitle}
+              disabled={ocrBusy}
+              onChange={(e) => setDoTitle(e.target.checked)}
+            />
+            Title
+          </label>
+          <label className="flex items-center gap-1 text-[13px] text-slate-700">
+            <input
+              type="checkbox"
+              className="accent-slate-900"
+              checked={doDrawing}
+              disabled={ocrBusy}
+              onChange={(e) => setDoDrawing(e.target.checked)}
+            />
+            Drawing
+          </label>
+          <label className="flex items-center gap-1 text-[13px] text-slate-700">
+            <input
+              type="checkbox"
+              className="accent-slate-900"
+              checked={doAllPages}
+              disabled={ocrBusy || pageCount < 2}
+              onChange={(e) => setDoAllPages(e.target.checked)}
+            />
+            {pageCount > 1 ? `All ${pageCount}` : "All"}
+          </label>
         </div>
+        {ocrBusy ? (
+          <div className="space-y-0.5">
+            <div className="h-1 overflow-hidden rounded-full bg-slate-200">
+              <div className="h-full rounded-full bg-brand-600 transition-all" style={{ width: `${progressPct}%` }} />
+            </div>
+            <p className="text-xs leading-snug text-slate-500">
+              {ocrStatus ?? "Extracting text…"}
+              {ocrProgress ? ` · ${progressPct}%` : ""}
+            </p>
+          </div>
+        ) : null}
+        {ocrError ? <p className="text-xs leading-snug text-red-600">{ocrError}</p> : null}
+        {ocrNotice ? <p className="text-xs leading-snug text-amber-700">{ocrNotice}</p> : null}
+        {digitalPdf && !ocrBusy && onExtractPdfText ? (
+          <p className="text-xs leading-snug text-slate-500">
+            Digital PDF reads selectable text in the Title / Drawing areas you check. Run Auto
+            layout first so those zones exist.
+          </p>
+        ) : null}
       </div>
 
-      {/* Extracted Lines List Group */}
-      <div className="space-y-2 rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
-        <div className="flex items-center justify-between">
-          <span className="font-semibold text-slate-800">
-            Line Items ({filteredLines.length}
-            {activeLines.length !== filteredLines.length ? ` / ${activeLines.length}` : ""})
-          </span>
-          <button
-            type="button"
-            onClick={handleCopyLines}
-            className="rounded border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-medium text-slate-700 hover:bg-slate-100"
-          >
-            {copied === "lines" ? "Copied!" : "Copy Lines"}
-          </button>
-        </div>
-
-        {/* Filter / Search input */}
-        <div className="flex gap-2">
-          <input
-            type="text"
-            placeholder="Search OCR lines (e.g. Scale, Level)..."
-            value={filterText}
-            onChange={(e) => setFilterText(e.target.value)}
-            className="w-full rounded border border-slate-200 px-2.5 py-1 text-xs placeholder:text-slate-400 focus:border-teal-500 focus:outline-none"
-          />
-        </div>
-
-        {/* Line Items List */}
-        <div className="max-h-56 space-y-1 overflow-y-auto rounded border border-slate-100 bg-slate-50/50 p-1.5">
-          {filteredLines.length === 0 ? (
-            <p className="py-4 text-center text-slate-400">
-              {activeLines.length === 0
-                ? "No OCR lines for this view yet."
-                : "No lines match the search filter."}
+      <div className="space-y-1">
+        <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Sheet</p>
+        {ocrMeta?.provider || drawingOcrMeta?.provider ? (
+          <Row label="Source">
+            <p className="truncate text-[13px] text-slate-800">
+              {pdfTextProvider ? "Digital PDF" : ocrMeta?.provider || drawingOcrMeta?.provider}
             </p>
-          ) : (
-            filteredLines.map((line, idx) => {
-              const conf = line.confidence ?? 0;
-              const confBadgeColor =
-                conf >= 0.85
-                  ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                  : conf >= 0.65
-                    ? "bg-blue-50 text-blue-700 border-blue-200"
-                    : "bg-amber-50 text-amber-700 border-amber-200";
+          </Row>
+        ) : null}
+        <Row label="Floor">
+          <p className="truncate text-[13px] text-slate-800">{ocrMeta?.levelName || "—"}</p>
+        </Row>
+        <Row label="Scale">
+          <div className="flex items-center gap-1">
+            <p className="min-w-0 flex-1 truncate text-[13px] text-slate-800">{ocrMeta?.scaleText || "—"}</p>
+            {ocrMeta?.scaleText && onApplyDetectedScale ? (
+              <button
+                type="button"
+                className={
+                  scaleApplyState === "fail"
+                    ? "h-5 shrink-0 rounded bg-red-700 px-1.5 text-xs font-medium text-white hover:bg-red-800"
+                    : scaleApplyState === "ok"
+                      ? "h-5 shrink-0 rounded bg-teal-700 px-1.5 text-xs font-medium text-white hover:bg-teal-800"
+                      : "btn-compact-primary h-5 px-1.5"
+                }
+                onClick={() => {
+                  const ok = onApplyDetectedScale();
+                  setScaleApplyState(ok === false ? "fail" : "ok");
+                }}
+              >
+                {scaleApplyState === "fail" ? "Failed" : scaleApplyState === "ok" ? "Applied" : "Apply"}
+              </button>
+            ) : null}
+          </div>
+        </Row>
+        {activeScaleLabel ? (
+          <Row label="Active">
+            <p className="truncate text-[13px] tabular-nums text-slate-800">{activeScaleLabel}</p>
+          </Row>
+        ) : null}
+        {scaleMethod ? (
+          <Row label="Method">
+            <p className="truncate text-[13px] text-slate-800" title={scaleMethod}>
+              {scaleMethod}
+            </p>
+          </Row>
+        ) : null}
+        <Row label="Title">
+          <p className="truncate text-[13px] text-slate-800" title={ocrMeta?.title ?? undefined}>
+            {ocrMeta?.title || "—"}
+          </p>
+        </Row>
+        {ocrMeta?.unitIds && ocrMeta.unitIds.length > 0 ? (
+          <Row label="Units">
+            <p className="truncate text-[13px] tabular-nums text-slate-800">{ocrMeta.unitIds.join(" · ")}</p>
+          </Row>
+        ) : null}
+      </div>
 
+      <div className="space-y-1">
+        <div className="flex items-center justify-between gap-1">
+          <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Text</p>
+          <div className="flex gap-1">
+            {(onClearOcrLines && activeLineRefs.length > 0) ? (
+              <button
+                type="button"
+                className="h-5 rounded border border-slate-300 px-1.5 text-xs text-red-700 hover:bg-red-50"
+                title="Remove all lines in the current view"
+                onClick={() => onClearOcrLines(textBoxView)}
+              >
+                Clear
+              </button>
+            ) : null}
+            <button
+              type="button"
+              disabled={!fullTextContent}
+              className="h-5 rounded border border-slate-300 px-1.5 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+              onClick={() => copy("text", fullTextContent)}
+            >
+              {copied === "text" ? "Copied" : "Copy"}
+            </button>
+            <button
+              type="button"
+              className="h-5 rounded border border-slate-300 px-1.5 text-xs text-slate-700 hover:bg-slate-50"
+              onClick={() =>
+                copy(
+                  "json",
+                  JSON.stringify({ sheet: ocrMeta, drawingOcr: drawingOcrMeta, titleLines, drawingLines }, null, 2),
+                )
+              }
+            >
+              {copied === "json" ? "Copied" : "JSON"}
+            </button>
+          </div>
+        </div>
+        <div className="flex gap-0.5 rounded bg-slate-100 p-0.5">
+          {(
+            [
+              ["all", `All ${allLines.length}`],
+              ["title_block", `Title ${titleLines.length}`],
+              ["drawing", `Draw ${drawingLines.length}`],
+            ] as const
+          ).map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              className={`h-5 flex-1 rounded text-xs font-medium ${
+                textBoxView === id ? "bg-white text-slate-900 shadow-sm" : "text-slate-600 hover:text-slate-900"
+              }`}
+              onClick={() => setTextBoxView(id)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <textarea
+          readOnly
+          value={fullTextContent}
+          placeholder="Run OCR or PDF text to fill this page."
+          rows={5}
+          className="w-full resize-y rounded border border-slate-200 bg-white px-1.5 py-1 font-mono text-[13px] leading-snug text-slate-800"
+        />
+      </div>
+
+      <div className="space-y-1">
+        <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+          Lines · {filteredLineRefs.length}
+        </p>
+        <input
+          type="text"
+          placeholder="Search lines…"
+          value={filterText}
+          onChange={(e) => setFilterText(e.target.value)}
+          className="h-6 w-full rounded border border-slate-300 px-1.5 text-[13px] placeholder:text-slate-400"
+        />
+        <ul className="max-h-44 divide-y divide-slate-100 overflow-y-auto rounded-md border border-slate-200 bg-white">
+          {filteredLineRefs.length === 0 ? (
+            <li className="px-1.5 py-2 text-center text-xs text-slate-400">
+              {activeLineRefs.length === 0 ? "No lines yet" : "No match"}
+            </li>
+          ) : (
+            filteredLineRefs.map(({ line, source, index }) => {
+              const box = formatOcrBbox(line.bbox);
               return (
-                <div
-                  key={idx}
-                  className="flex items-center justify-between gap-2 rounded border border-slate-200/80 bg-white px-2 py-1.5 shadow-[0_1px_2px_rgba(0,0,0,0.02)] hover:border-teal-300"
-                >
-                  <span className="font-mono select-all text-[11px] text-slate-800">
-                    {line.text}
-                  </span>
-                  <span
-                    className={`shrink-0 rounded border px-1.5 py-0.5 font-mono text-[10px] font-medium ${confBadgeColor}`}
+              <li key={`${source}:${index}:${line.text}`} className="group flex items-start gap-1 px-1.5 py-1 hover:bg-slate-50">
+                <span className="min-w-0 flex-1 font-mono text-[13px] leading-snug text-slate-800">
+                  <span className="block truncate">{line.text}</span>
+                  {box ? (
+                    <span className="block tabular-nums text-xs text-slate-400">{box}</span>
+                  ) : null}
+                </span>
+                <span className="shrink-0 tabular-nums text-xs text-slate-400">
+                  {line.confidence != null && line.confidence < 0.999
+                    ? formatConfidence(line.confidence)
+                    : pdfTextProvider
+                      ? "PDF"
+                      : formatConfidence(line.confidence ?? 0)}
+                </span>
+                {onDeleteOcrLine ? (
+                  <button
+                    type="button"
+                    className="h-5 shrink-0 rounded px-1 text-xs text-slate-400 opacity-0 hover:text-red-700 group-hover:opacity-100"
+                    title="Remove line"
+                    onClick={() => onDeleteOcrLine(source, index)}
                   >
-                    {formatConfidence(conf)}
-                  </span>
-                </div>
+                    ×
+                  </button>
+                ) : null}
+              </li>
               );
             })
           )}
-        </div>
+        </ul>
       </div>
 
-      {/* PaddleOCR Settings Group */}
-      <div className="space-y-3 rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
-        <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+      <div className="space-y-1.5">
+        <div className="flex items-center justify-between">
           <button
             type="button"
-            onClick={() => setShowAdvanced(!showAdvanced)}
-            className="flex items-center gap-1.5 font-semibold text-slate-800 hover:text-slate-900"
+            className="text-xs font-semibold uppercase tracking-wider text-slate-400 hover:text-slate-600"
+            onClick={() => setShowAdvanced((v) => !v)}
           >
-            <span>PaddleOCR Options & Hyperparameters</span>
-            <span className="text-[10px] text-slate-400">
-              {showAdvanced ? "▲ Hide" : "▼ Show"}
-            </span>
+            Options {showAdvanced ? "▴" : "▾"}
           </button>
-          <button
-            type="button"
-            onClick={resetDefaults}
-            className="text-[11px] font-medium text-teal-600 hover:text-teal-800"
-            title="Reset to default PaddleOCR parameters"
-          >
-            Reset defaults
-          </button>
+          {showAdvanced ? (
+            <button type="button" className="text-xs text-slate-500 hover:text-slate-800" onClick={resetDefaults}>
+              Reset
+            </button>
+          ) : null}
         </div>
-
         {showAdvanced ? (
-          <div className="space-y-3 pt-1">
-            <div className="space-y-1">
-              <label className="font-medium text-slate-800">
-                Vision model (<code className="text-slate-600">backend</code>)
-              </label>
+          <div className="space-y-1.5">
+            <Row label="Engine">
               <select
-                value={backend === "vl" ? "vl" : "classic"}
+                className="h-6 w-full rounded border border-slate-300 bg-white px-1 text-[13px]"
+                value={isVl ? "vl" : "classic"}
                 onChange={(e) => setBackend(e.target.value === "vl" ? "vl" : "classic")}
-                className="w-full rounded border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-800 focus:border-teal-500 focus:outline-none"
               >
-                <option value="classic">Classic PP-OCR (det + rec)</option>
-                <option value="vl">PaddleOCR-VL 0.9B (VLM)</option>
+                <option value="classic">Classic PP-OCR</option>
+                <option value="vl">PaddleOCR-VL</option>
               </select>
-              <p className="text-[10px] leading-relaxed text-slate-500">
-                {backend === "vl"
-                  ? "Uses Hugging Face PaddlePaddle/PaddleOCR-VL. Needs paddleocr[doc-parser]≥3.4 and GPU recommended. Title-block crops work best."
-                  : "Default CNN detector + recognizer (paddleocr 2.7 / PP-OCR). Fast on CPU."}
-              </p>
-            </div>
-
-            {isVl ? (
-              <>
-                <div className="space-y-1">
-                  <label className="font-medium text-slate-800">
-                    Pipeline version (<code className="text-slate-600">pipeline_version</code>)
-                  </label>
-                  <select
-                    value={pipelineVersion === "v1.5" || pipelineVersion === "v1.6" ? pipelineVersion : "v1"}
-                    onChange={(e) =>
-                      setPipelineVersion(e.target.value as "v1" | "v1.5" | "v1.6")
-                    }
-                    className="w-full rounded border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-800 focus:border-teal-500 focus:outline-none"
-                  >
-                    {VL_PIPELINE_OPTIONS.map((opt) => (
-                      <option key={opt.value} value={opt.value}>
-                        {opt.label}
-                      </option>
-                    ))}
-                  </select>
-                  <p className="text-[10px] leading-relaxed text-slate-500">
-                    v1 uses the local PaddleOCR-VL 0.9B snapshot. v1.6 needs
-                    PaddleOCR-VL-1.6-0.9B (downloaded on first run if it is not on disk).
-                  </p>
-                </div>
-
-                <div className="space-y-2">
-                  <label className="flex items-start justify-between gap-2 cursor-pointer">
-                    <div>
-                      <div className="font-medium text-slate-800">Layout detection</div>
-                      <div className="text-[10px] text-slate-500">
-                        <code className="text-slate-600">use_layout_detection</code> · PP-DocLayout
-                        regions before VL recognition
-                      </div>
-                    </div>
-                    <input
-                      type="checkbox"
-                      checked={Boolean(useLayoutDetection)}
-                      onChange={(e) => setUseLayoutDetection(e.target.checked)}
-                      className="mt-0.5 h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
-                    />
-                  </label>
-
-                  <label className="flex items-start justify-between gap-2 cursor-pointer">
-                    <div>
-                      <div className="font-medium text-slate-800">Document orientation</div>
-                      <div className="text-[10px] text-slate-500">
-                        <code className="text-slate-600">use_doc_orientation_classify</code> · Rotate
-                        90°/180°/270° pages
-                      </div>
-                    </div>
-                    <input
-                      type="checkbox"
-                      checked={useDocOrientationClassify}
-                      onChange={(e) => setUseDocOrientationClassify(e.target.checked)}
-                      className="mt-0.5 h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
-                    />
-                  </label>
-
-                  <label className="flex items-start justify-between gap-2 cursor-pointer">
-                    <div>
-                      <div className="font-medium text-slate-800">Document unwarping</div>
-                      <div className="text-[10px] text-slate-500">
-                        <code className="text-slate-600">use_doc_unwarping</code> · Flatten warped
-                        scans (off by default in VL)
-                      </div>
-                    </div>
-                    <input
-                      type="checkbox"
-                      checked={useDocUnwarping}
-                      onChange={(e) => setUseDocUnwarping(e.target.checked)}
-                      className="mt-0.5 h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
-                    />
-                  </label>
-
-                  <label className="flex items-start justify-between gap-2 cursor-pointer">
-                    <div>
-                      <div className="font-medium text-slate-800">GPU acceleration</div>
-                      <div className="text-[10px] text-slate-500">
-                        <code className="text-slate-600">device=gpu</code> · Recommended for VL (~4GB
-                        VRAM)
-                      </div>
-                    </div>
-                    <input
-                      type="checkbox"
-                      checked={useGpu}
-                      onChange={(e) => setUseGpu(e.target.checked)}
-                      className="mt-0.5 h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
-                    />
-                  </label>
-                </div>
-
-                <div className="space-y-1">
-                  <label className="font-medium text-slate-800">
-                    Max image side (<code className="text-slate-600">vl_max_side</code>)
-                  </label>
-                  <select
-                    value={vlMaxSide || 2048}
-                    onChange={(e) => setVlMaxSide(parseInt(e.target.value, 10))}
-                    className="w-full rounded border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-800 focus:border-teal-500 focus:outline-none"
-                  >
-                    {VL_MAX_SIDE_OPTIONS.map((opt) => (
-                      <option key={opt.value} value={opt.value}>
-                        {opt.label}
-                      </option>
-                    ))}
-                  </select>
-                  <p className="text-[10px] leading-relaxed text-slate-500">
-                    VL downscales the longest side before inference. Title-block crops skip
-                    layout detection automatically. First VL load on CPU can take several
-                    minutes; later runs reuse the loaded model.
-                  </p>
-                </div>
-              </>
-            ) : (
-              <>
-            {/* Toggle Switches */}
-            <div className="space-y-2">
-              <label className="flex items-start justify-between gap-2 cursor-pointer">
-                <div>
-                  <div className="font-medium text-slate-800">
-                    Document Orientation Classify
-                  </div>
-                  <div className="text-[10px] text-slate-500">
-                    <code className="text-slate-600">use_doc_orientation_classify</code> · Rotates 90°/180°/270° orientation
-                  </div>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={useDocOrientationClassify}
-                  onChange={(e) => setUseDocOrientationClassify(e.target.checked)}
-                  className="mt-0.5 h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
-                />
-              </label>
-
-              <label className="flex items-start justify-between gap-2 cursor-pointer">
-                <div>
-                  <div className="font-medium text-slate-800">
-                    Document Unwarping
-                  </div>
-                  <div className="text-[10px] text-slate-500">
-                    <code className="text-slate-600">use_doc_unwarping</code> · Flattens warped / folded scan curves
-                  </div>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={useDocUnwarping}
-                  onChange={(e) => setUseDocUnwarping(e.target.checked)}
-                  className="mt-0.5 h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
-                />
-              </label>
-
-              <label className="flex items-start justify-between gap-2 cursor-pointer">
-                <div>
-                  <div className="font-medium text-slate-800">
-                    Textline Orientation
-                  </div>
-                  <div className="text-[10px] text-slate-500">
-                    <code className="text-slate-600">use_textline_orientation</code> · Angles vertical & inverted lines
-                  </div>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={useTextlineOrientation}
-                  onChange={(e) => setUseTextlineOrientation(e.target.checked)}
-                  className="mt-0.5 h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
-                />
-              </label>
-
-              <label className="flex items-start justify-between gap-2 cursor-pointer">
-                <div>
-                  <div className="font-medium text-slate-800">
-                    GPU Acceleration
-                  </div>
-                  <div className="text-[10px] text-slate-500">
-                    <code className="text-slate-600">use_gpu</code> · Run OCR on CUDA / TensorRT when available
-                  </div>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={useGpu}
-                  onChange={(e) => setUseGpu(e.target.checked)}
-                  className="mt-0.5 h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
-                />
-              </label>
-            </div>
-
-            {/* Threshold Slider: text_rec_score_thresh */}
-            <div className="space-y-1 rounded border border-slate-100 bg-slate-50/60 p-2">
-              <div className="flex items-center justify-between">
-                <div>
-                  <span className="font-medium text-slate-800">Score Threshold</span>{" "}
-                  <code className="text-[10px] text-slate-500">text_rec_score_thresh</code>
-                </div>
-                <span className="font-mono font-semibold text-teal-700">
-                  {textRecScoreThresh.toFixed(2)}
-                </span>
-              </div>
-              <input
-                type="range"
-                min="0.0"
-                max="1.0"
-                step="0.05"
-                value={textRecScoreThresh}
-                onChange={(e) => setTextRecScoreThresh(parseFloat(e.target.value))}
-                className="h-1.5 w-full cursor-pointer appearance-none rounded-lg bg-slate-200 accent-teal-600"
-              />
-              <div className="flex justify-between text-[10px] text-slate-400">
-                <span>0.0 (Keep all)</span>
-                <span>0.5 (Balanced)</span>
-                <span>0.9 (Strict)</span>
-              </div>
-            </div>
-
-            {/* Detection Resolution: det_limit_side_len */}
-            <div className="space-y-1">
-              <label className="font-medium text-slate-800">
-                Detection Limit Side Length (<code className="text-slate-600">det_limit_side_len</code>)
-              </label>
+            </Row>
+            <Row label="Lang">
               <select
-                value={detLimitSideLen}
-                onChange={(e) => setDetLimitSideLen(parseInt(e.target.value, 10))}
-                className="w-full rounded border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-800 focus:border-teal-500 focus:outline-none"
-              >
-                {DET_LIMIT_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </option>
-                ))}
-              </select>
-              <p className="text-[10px] leading-relaxed text-slate-500">
-                PaddleOCR default is 960px (longest side). Larger pages are tiled at this size,
-                like YOLO inference. Smaller crops are upsampled so small text stays readable.
-              </p>
-            </div>
-
-            {/* Detection DB Threshold: det_db_thresh */}
-            <div className="space-y-1 rounded border border-slate-100 bg-slate-50/60 p-2">
-              <div className="flex items-center justify-between">
-                <div>
-                  <span className="font-medium text-slate-800">DB Binarization Thresh</span>{" "}
-                  <code className="text-[10px] text-slate-500">det_db_thresh</code>
-                </div>
-                <span className="font-mono font-semibold text-teal-700">
-                  {detDbThresh.toFixed(2)}
-                </span>
-              </div>
-              <input
-                type="range"
-                min="0.10"
-                max="0.80"
-                step="0.05"
-                value={detDbThresh}
-                onChange={(e) => setDetDbThresh(parseFloat(e.target.value))}
-                className="h-1.5 w-full cursor-pointer appearance-none rounded-lg bg-slate-200 accent-teal-600"
-              />
-              <div className="flex justify-between text-[10px] text-slate-400">
-                <span>0.10 (Sensitive)</span>
-                <span>0.25 (Default)</span>
-                <span>0.80 (Clean only)</span>
-              </div>
-            </div>
-
-            {/* Language */}
-            <div className="space-y-1">
-              <label className="font-medium text-slate-800">
-                Language Model (<code className="text-slate-600">lang</code>)
-              </label>
-              <select
+                className="h-6 w-full rounded border border-slate-300 bg-white px-1 text-[13px]"
                 value={lang}
                 onChange={(e) => setLang(e.target.value)}
-                className="w-full rounded border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-800 focus:border-teal-500 focus:outline-none"
               >
                 {OCR_LANG_OPTIONS.map((opt) => (
                   <option key={opt.value} value={opt.value}>
@@ -863,7 +616,163 @@ export function OcrPanel({
                   </option>
                 ))}
               </select>
-            </div>
+            </Row>
+            <Row label="GPU">
+              <input
+                type="checkbox"
+                className="accent-slate-900"
+                checked={useGpu}
+                onChange={(e) => setUseGpu(e.target.checked)}
+              />
+            </Row>
+            {isVl ? (
+              <>
+                <Row label="Pipe">
+                  <select
+                    className="h-6 w-full rounded border border-slate-300 bg-white px-1 text-[13px]"
+                    value={pipelineVersion === "v1.5" || pipelineVersion === "v1.6" ? pipelineVersion : "v1"}
+                    onChange={(e) => setPipelineVersion(e.target.value as "v1" | "v1.5" | "v1.6")}
+                  >
+                    {VL_PIPELINE_OPTIONS.map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
+                </Row>
+                <Row label="Side">
+                  <select
+                    className="h-6 w-full rounded border border-slate-300 bg-white px-1 text-[13px]"
+                    value={vlMaxSide || 0}
+                    onChange={(e) => setVlMaxSide(parseInt(e.target.value, 10))}
+                  >
+                    {VL_MAX_SIDE_OPTIONS.map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
+                </Row>
+                <Row label="Layout">
+                  <input
+                    type="checkbox"
+                    className="accent-slate-900"
+                    checked={Boolean(useLayoutDetection)}
+                    onChange={(e) => setUseLayoutDetection(e.target.checked)}
+                  />
+                </Row>
+                <Row label="Orient">
+                  <input
+                    type="checkbox"
+                    className="accent-slate-900"
+                    checked={useDocOrientationClassify}
+                    onChange={(e) => setUseDocOrientationClassify(e.target.checked)}
+                    title="Whole-photo rotation. Drawing OCR turns this off so boxes stay on the printed text."
+                  />
+                </Row>
+                <Row label="Unwarp">
+                  <input
+                    type="checkbox"
+                    className="accent-slate-900"
+                    checked={useDocUnwarping}
+                    onChange={(e) => setUseDocUnwarping(e.target.checked)}
+                  />
+                </Row>
+              </>
+            ) : (
+              <>
+                <Row label="Tiles">
+                  <div className="flex items-center gap-3">
+                    <label className="flex items-center gap-1 text-[13px] text-slate-700" title="Split the title-block crop into overlapping windows. Can cut scale / paper lines in half.">
+                      <input
+                        type="checkbox"
+                        className="accent-slate-900"
+                        checked={tileTitleBlock}
+                        onChange={(e) => setTileTitleBlock(e.target.checked)}
+                      />
+                      Title
+                    </label>
+                    <label className="flex items-center gap-1 text-[13px] text-slate-700" title="Split the drawing-area crop into overlapping windows. Can cut room names and dimensions.">
+                      <input
+                        type="checkbox"
+                        className="accent-slate-900"
+                        checked={tileDrawing}
+                        onChange={(e) => setTileDrawing(e.target.checked)}
+                      />
+                      Drawing
+                    </label>
+                  </div>
+                </Row>
+                <Row label="Orient">
+                  <input
+                    type="checkbox"
+                    className="accent-slate-900"
+                    checked={useDocOrientationClassify}
+                    onChange={(e) => setUseDocOrientationClassify(e.target.checked)}
+                    title="Whole-photo rotation. Drawing OCR turns this off so boxes stay on the printed text."
+                  />
+                </Row>
+                <Row label="Unwarp">
+                  <input
+                    type="checkbox"
+                    className="accent-slate-900"
+                    checked={useDocUnwarping}
+                    onChange={(e) => setUseDocUnwarping(e.target.checked)}
+                  />
+                </Row>
+                <Row label="Lines">
+                  <input
+                    type="checkbox"
+                    className="accent-slate-900"
+                    checked={useTextlineOrientation}
+                    onChange={(e) => setUseTextlineOrientation(e.target.checked)}
+                  />
+                </Row>
+                <Row label="Score">
+                  <div className="flex items-center gap-1">
+                    <input
+                      type="range"
+                      min="0"
+                      max="1"
+                      step="0.05"
+                      value={textRecScoreThresh}
+                      onChange={(e) => setTextRecScoreThresh(parseFloat(e.target.value))}
+                      className="h-1.5 min-w-0 flex-1 accent-slate-900"
+                    />
+                    <span className="w-8 shrink-0 text-right tabular-nums text-xs text-slate-500">
+                      {textRecScoreThresh.toFixed(2)}
+                    </span>
+                  </div>
+                </Row>
+                <Row label="DB">
+                  <div className="flex items-center gap-1">
+                    <input
+                      type="range"
+                      min="0.10"
+                      max="0.80"
+                      step="0.05"
+                      value={detDbThresh}
+                      onChange={(e) => setDetDbThresh(parseFloat(e.target.value))}
+                      className="h-1.5 min-w-0 flex-1 accent-slate-900"
+                    />
+                    <span className="w-8 shrink-0 text-right tabular-nums text-xs text-slate-500">
+                      {detDbThresh.toFixed(2)}
+                    </span>
+                  </div>
+                </Row>
+                <Row label="Det">
+                  <select
+                    className="h-6 w-full rounded border border-slate-300 bg-white px-1 text-[13px]"
+                    value={detLimitSideLen || 0}
+                    onChange={(e) => setDetLimitSideLen(parseInt(e.target.value, 10))}
+                  >
+                    {DET_LIMIT_OPTIONS.map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
+                </Row>
               </>
             )}
           </div>

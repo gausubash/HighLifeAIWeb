@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import re
 from collections.abc import Callable
 from typing import Any
 
@@ -134,23 +135,38 @@ def _intersect_area(
     return max(0.0, ix1 - ix0) * max(0.0, iy1 - iy0)
 
 
+def _text_key(text: str) -> str:
+    """Compare OCR strings ignoring case, spaces, and punctuation."""
+    return re.sub(r"[^a-z0-9]+", "", _norm_text(text))
+
+
 def ocr_lines_near_duplicate(a: dict[str, Any], b: dict[str, Any]) -> bool:
     """True when two detections are likely the same label in tile overlap."""
-    ta = _norm_text(str(a.get("text") or ""))
-    tb = _norm_text(str(b.get("text") or ""))
+    ta = _text_key(str(a.get("text") or ""))
+    tb = _text_key(str(b.get("text") or ""))
     if not ta or ta != tb:
         return False
     ca = _line_center(a)
     cb = _line_center(b)
     if ca is None or cb is None:
-        return ta == tb
-    box = _line_bbox(a) or _line_bbox(b)
-    if box:
+        return True
+    ba, bb = _line_bbox(a), _line_bbox(b)
+    if ba and bb:
+        inter = _intersect_area(ba, bb)
+        area_a = max(1.0, (ba[2] - ba[0]) * (ba[3] - ba[1]))
+        area_b = max(1.0, (bb[2] - bb[0]) * (bb[3] - bb[1]))
+        if inter / min(area_a, area_b) >= 0.22:
+            return True
+        w = max(ba[2] - ba[0], bb[2] - bb[0], 1.0)
+        h = max(ba[3] - ba[1], bb[3] - bb[1], 1.0)
+    elif ba or bb:
+        box = ba or bb
         w = max(1.0, box[2] - box[0])
         h = max(1.0, box[3] - box[1])
-        thresh = max(14.0, min(w, h) * 0.65)
     else:
-        thresh = 18.0
+        w, h = 40.0, 14.0
+    # Use width, not min(w,h). Wide room labels jitter more horizontally across tiles.
+    thresh = max(18.0, 0.45 * w, 0.9 * h)
     return math.hypot(ca[0] - cb[0], ca[1] - cb[1]) <= thresh
 
 
@@ -222,18 +238,23 @@ def _combine_text(left: str, right: str, *, min_overlap: int, allow_concat: bool
 def _better_reading(a: dict[str, Any], b: dict[str, Any]) -> dict[str, Any]:
     ta = str(a.get("text") or "").strip()
     tb = str(b.get("text") or "").strip()
-    na, nb = _norm_text(ta), _norm_text(tb)
+    ka, kb = _text_key(ta), _text_key(tb)
     cut_a = bool(_cut_set(a))
     cut_b = bool(_cut_set(b))
-    if na and nb:
-        if na in nb and na != nb:
+    if ka and kb:
+        if ka == kb:
+            punct_a = len(ta) - len(ka)
+            punct_b = len(tb) - len(kb)
+            if punct_a != punct_b:
+                return a if punct_a < punct_b else b
+        elif ka in kb and ka != kb:
             return b
-        if nb in na and na != nb:
+        elif kb in ka and ka != kb:
             return a
     if cut_a != cut_b:
         return b if cut_a else a
-    if abs(len(ta) - len(tb)) >= 2:
-        return a if len(ta) > len(tb) else b
+    if abs(len(ka) - len(kb)) >= 2:
+        return a if len(ka) > len(kb) else b
     ca = float(a.get("confidence") or 0)
     cb = float(b.get("confidence") or 0)
     if ca != cb:

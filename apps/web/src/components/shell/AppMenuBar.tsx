@@ -21,6 +21,7 @@ import { useAuth } from "@/lib/auth/AuthProvider";
 import type { StudioTabId } from "@/features/studio/StudioTabBar";
 import { useStudioNavStore } from "@/features/studio/useStudioNavStore";
 import { cn } from "@/lib/utils";
+import { useThemeStore } from "@/lib/theme/useThemeStore";
 
 type MenuId = "file" | "project" | "studio" | "view" | "account" | null;
 
@@ -29,12 +30,14 @@ function MenuItem({
   shortcut,
   disabled,
   danger,
+  checked,
   onClick,
 }: {
   label: string;
   shortcut?: string;
   disabled?: boolean;
   danger?: boolean;
+  checked?: boolean;
   onClick?: () => void;
 }) {
   return (
@@ -43,22 +46,61 @@ function MenuItem({
       disabled={disabled}
       onClick={onClick}
       className={cn(
-        "flex w-full items-center justify-between gap-6 px-3 py-1.5 text-left text-xs",
+        "flex w-full items-center justify-between gap-6 px-3 py-1.5 text-left text-[14px]",
         disabled
           ? "cursor-not-allowed text-slate-300"
           : danger
             ? "text-red-700 hover:bg-red-50"
-            : "text-slate-700 hover:bg-slate-100"
+            : "text-slate-700 hover:bg-slate-50"
       )}
     >
-      <span>{label}</span>
-      {shortcut && <span className="text-[10px] text-slate-400">{shortcut}</span>}
+      <span className="flex items-center gap-2">
+        {checked != null ? (
+          <span className="w-3 text-[13px] text-slate-400">{checked ? "✓" : ""}</span>
+        ) : null}
+        {label}
+      </span>
+      {shortcut && <span className="text-xs text-slate-400">{shortcut}</span>}
     </button>
   );
 }
 
 function MenuDivider() {
   return <div className="my-1 border-t border-slate-200" />;
+}
+
+function ThemeSubmenu({
+  theme,
+  onPick,
+}: {
+  theme: "light" | "dark";
+  onPick: (mode: "light" | "dark") => void;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div
+      className="relative"
+      onMouseEnter={() => setOpen(true)}
+      onMouseLeave={() => setOpen(false)}
+    >
+      <button
+        type="button"
+        className="flex w-full items-center justify-between gap-6 px-3 py-1.5 text-left text-[14px] text-slate-700 hover:bg-slate-50"
+      >
+        <span>Theme</span>
+        <span className="text-xs text-slate-400">›</span>
+      </button>
+      {open ? (
+        <div
+          role="menu"
+          className="hl-island absolute left-full top-0 z-50 ml-0.5 min-w-[140px] py-1"
+        >
+          <MenuItem label="Light" checked={theme === "light"} onClick={() => onPick("light")} />
+          <MenuItem label="Dark" checked={theme === "dark"} onClick={() => onPick("dark")} />
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 export function AppMenuBar() {
@@ -90,6 +132,8 @@ export function AppMenuBar() {
   const analysisId = analysisMatch?.[1];
   const inStudio = pathname.startsWith("/studio");
   const setStudioTab = useStudioNavStore((s) => s.setTab);
+  const theme = useThemeStore((s) => s.theme);
+  const setTheme = useThemeStore((s) => s.setTheme);
 
   const close = useCallback(() => setOpenMenu(null), []);
 
@@ -217,6 +261,7 @@ export function AppMenuBar() {
                 onClick={() => run(toggleInspector)}
               />
               <MenuDivider />
+              <ThemeSubmenu theme={theme} onPick={(mode) => run(() => setTheme(mode))} />
               <MenuItem
                 label="Reset layout"
                 onClick={() =>
@@ -238,7 +283,7 @@ export function AppMenuBar() {
           label: "Account",
           content: (
             <>
-              <div className="px-3 py-1.5 text-[10px] text-slate-400">
+              <div className="px-3 py-1.5 text-xs text-slate-500">
                 {user?.email ?? "Signed in"}
               </div>
               <MenuDivider />
@@ -314,7 +359,7 @@ export function AppMenuBar() {
             onClick={() =>
               run(() => {
                 if (projectId) {
-                  setInspectorOpen(true);
+                  setSidebarOpen(true);
                   router.push(`/projects/${projectId}`);
                 }
               })
@@ -342,7 +387,7 @@ export function AppMenuBar() {
       content: (
         <>
           <MenuItem
-            label={sidebarOpen ? "Hide sidebar" : "Show sidebar"}
+            label={sidebarOpen ? "Hide properties panel" : "Show properties panel"}
             shortcut="Ctrl+B"
             onClick={() => run(toggleSidebar)}
           />
@@ -356,6 +401,7 @@ export function AppMenuBar() {
             onClick={() => run(toggleInspector)}
           />
           <MenuDivider />
+          <ThemeSubmenu theme={theme} onPick={(mode) => run(() => setTheme(mode))} />
           <MenuItem
             label="Reset layout"
             onClick={() =>
@@ -377,7 +423,7 @@ export function AppMenuBar() {
       label: "Account",
       content: (
         <>
-          <div className="px-3 py-1.5 text-[10px] text-slate-400">
+          <div className="px-3 py-1.5 text-xs text-slate-500">
             {user?.email ?? "Signed in"}
           </div>
           <MenuDivider />
@@ -405,12 +451,12 @@ export function AppMenuBar() {
   return (
     <div
       ref={barRef}
-      className="flex h-7 shrink-0 items-center border-b border-slate-200 bg-slate-50 px-1"
+      className="flex h-8 shrink-0 items-center px-1.5"
       role="menubar"
     >
       <Link
         href={inStudio ? "/studio" : "/projects"}
-        className="mr-2 px-2 font-display text-xs font-semibold text-brand-700 hover:text-brand-800"
+        className="mr-2 rounded px-2 py-1 font-display text-sm font-semibold text-[var(--hl-ink)] hover:bg-[var(--hl-raised)]"
       >
         HighLife
       </Link>
@@ -425,8 +471,8 @@ export function AppMenuBar() {
               aria-haspopup="true"
               aria-expanded={isOpen}
               className={cn(
-                "rounded px-2.5 py-1 text-xs text-slate-700",
-                isOpen ? "bg-slate-200" : "hover:bg-slate-200/70"
+                "rounded px-2.5 py-1 text-[14px] text-[var(--hl-ink)]",
+                isOpen ? "bg-[var(--hl-raised)]" : "hover:bg-[var(--hl-raised)]"
               )}
               onClick={() => setOpenMenu(isOpen ? null : menu.id)}
               onMouseEnter={() => {
@@ -438,7 +484,7 @@ export function AppMenuBar() {
             {isOpen && (
               <div
                 role="menu"
-                className="absolute left-0 top-full z-50 mt-0.5 min-w-[200px] rounded border border-slate-200 bg-white py-1 shadow-lg"
+                className="hl-island absolute left-0 top-full z-50 mt-1 min-w-[220px] py-1"
               >
                 {menu.content}
               </div>

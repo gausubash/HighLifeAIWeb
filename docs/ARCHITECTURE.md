@@ -103,14 +103,16 @@ pip install -r requirements.txt
 uvicorn app.api:app --reload --host 127.0.0.1 --port 8000
 ```
 
-## On RACE (later)
+## On RACE
 
-1. Provision / customise the GPU virtual station (Ubuntu or Windows).
-2. Clone this repo on the station; install CUDA + `requirements.txt` + `requirements-gpu.txt`.
+See **[`docs/RACE-UBUNTU.md`](RACE-UBUNTU.md)** for the automated Ubuntu bootstrap (`scripts/setup-race.sh`), VS Code Remote SSH, and daily `race-services.sh` workflow.
+
+1. Provision / customise the GPU virtual station (Ubuntu recommended).
+2. Run `./scripts/setup-race.sh` (clone, VS Code CLI, GitHub CLI, GPU venv).
 3. Configure service-role credentials for Supabase / AWS Storage (secrets stay on the station).
 4. Sync or download datasets/weights from Storage.
-5. Train via `services/training`; publish checkpoints to Storage.
-6. Run the **worker** so it claims jobs from Postgres and writes results (Phase 6). Use localhost FastAPI only if you need interactive debugging on the station.
+5. Train via `services/training` or Model Studio; publish checkpoints to Storage.
+6. Run the **worker** so it claims jobs from Postgres and writes results. Use localhost FastAPI only if you need interactive debugging on the station.
 
 ## Hard rules
 

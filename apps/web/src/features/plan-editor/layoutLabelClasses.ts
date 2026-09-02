@@ -11,10 +11,14 @@ const LAYOUT_LABEL_SET = new Set<string>(LAYOUT_LABELME_CLASSES);
 
 const LABEL_TO_LAYOUT_KIND: Record<string, LayoutRegionKind> = {
   "Title block": "title_block",
+  "Main drawing": "main_floorplan",
   "Drawing area": "main_floorplan",
+  "Legend & key": "legend",
   "Legend block": "legend",
-  "Drawing border": "drawing_border",
+  Production: "revision_block",
   "Revision block": "revision_block",
+  Border: "drawing_border",
+  "Drawing border": "drawing_border",
 };
 
 function norm(label: string): string {

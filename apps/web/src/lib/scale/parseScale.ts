@@ -352,6 +352,24 @@ export interface ScaleInfo {
   scaleLabel: string | null;
 }
 
+/** Short sidebar label for how the current drawing scale was set. */
+export function scaleMethodLabel(method: string | null | undefined): string {
+  switch (method) {
+    case "title_block_text":
+    case "auto_detect_scale":
+    case "ocr_scale":
+      return "OCR";
+    case "manual_scale_paper":
+      return "Manual";
+    case "manual_two_point":
+      return "Measure";
+    case "paper_size_auto":
+      return "Auto";
+    default:
+      return method?.trim() ? method.replace(/_/g, " ") : "—";
+  }
+}
+
 /**
  * Map 1:N @ paper onto a rendered page image.
  * Landscape uses the long paper edge as image width; portrait uses the short edge.
@@ -375,6 +393,48 @@ export function pixelsPerMeterFromScaleAndPaper(opts: {
   const sheetWidthMm = landscape ? longMm : shortMm;
   const realWidthM = (sheetWidthMm / 1000) * scaleRatio;
   return renderWidthPx / realWidthM;
+}
+
+/**
+ * Live px/m from draft 1:N, paper, and DPI. When a current raster size is known,
+ * DPI is applied as a scale of that raster; otherwise paper mm × DPI is used.
+ */
+export function previewPixelsPerMeterFromScalePaperDpi(opts: {
+  scaleRatio: number;
+  paper: string;
+  dpi: number;
+  renderWidthPx?: number;
+  renderHeightPx?: number;
+  renderDpi?: number;
+}): number | null {
+  const { scaleRatio, paper, dpi, renderWidthPx, renderHeightPx, renderDpi } = opts;
+  if (!(scaleRatio >= 1 && scaleRatio <= 10000) || !(dpi > 0) || !(paper in A_PAPER_SIZES_MM)) {
+    return null;
+  }
+  const size = A_PAPER_SIZES_MM[paper];
+  if (!size) return null;
+  const landscape = (renderWidthPx ?? 0) >= (renderHeightPx ?? 0);
+  const [shortMm, longMm] = size;
+  const sheetWidthMm = landscape ? longMm : shortMm;
+  const sheetHeightMm = landscape ? shortMm : longMm;
+  const predictedWidthPx =
+    renderWidthPx && renderDpi && renderDpi > 0
+      ? renderWidthPx * (dpi / renderDpi)
+      : (sheetWidthMm / MM_PER_INCH) * dpi;
+  const predictedHeightPx =
+    renderHeightPx && renderDpi && renderDpi > 0
+      ? renderHeightPx * (dpi / renderDpi)
+      : (sheetHeightMm / MM_PER_INCH) * dpi;
+  try {
+    return pixelsPerMeterFromScaleAndPaper({
+      scaleRatio,
+      paper,
+      renderWidthPx: predictedWidthPx,
+      renderHeightPx: predictedHeightPx,
+    });
+  } catch {
+    return null;
+  }
 }
 
 export function computeScaleInfo(opts: {

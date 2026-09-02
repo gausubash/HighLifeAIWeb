@@ -1,4 +1,4 @@
-"""Client-side analysis report exports (Phase 7)."""
+/** Client-side analysis report exports (Phase 7). */
 
 import type { AnalysisResult, ComplianceResult } from "@highlife/shared-types";
 

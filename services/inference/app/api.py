@@ -24,13 +24,15 @@ from pydantic import BaseModel, Field
 
 from app.config import get_settings
 from app.detect_catalog import (
+    WALL_BACKEND,
     default_detect_model,
     list_detect_models,
 )
 from app.detect_run import run_detect, serialize_detect_result, serialize_region
 from app.pipeline.run import run_pipeline
+from app.pipeline.room_extract import extract_from_image
 from app.yolo.mitunet import mitunet_ready
-from app.yolo.predict import room_enabled, wall_yolo_ready, yolo_ready
+from app.yolo.predict import resolve_room_weights, room_yolo_ready, wall_yolo_ready, yolo_ready
 from app.yolo.roboflow import roboflow_local_ready, roboflow_ready
 from app.yolo.tiling import DetectCancelled
 from app.yolo.wall_registry import (
@@ -129,6 +131,8 @@ def _build_ocr_options(
     pipeline_version: str,
     use_layout_detection: bool | None,
     vl_max_side: int | None,
+    tile_title_block: bool | None = None,
+    tile_drawing: bool | None = None,
 ) -> dict[str, Any]:
     ocr_options: dict[str, Any] = {
         "use_doc_orientation_classify": bool(use_doc_orientation_classify),
@@ -150,6 +154,10 @@ def _build_ocr_options(
         ocr_options["use_layout_detection"] = bool(use_layout_detection)
     if vl_max_side is not None:
         ocr_options["vl_max_side"] = int(vl_max_side)
+    if tile_title_block is not None:
+        ocr_options["tile_title_block"] = bool(tile_title_block)
+    if tile_drawing is not None:
+        ocr_options["tile_drawing"] = bool(tile_drawing)
     return ocr_options
 
 
@@ -200,7 +208,8 @@ def _sse(event: str, data: dict[str, Any]) -> str:
 def health() -> HealthResponse:
     settings = get_settings()
     ready = yolo_ready(settings)
-    rooms = room_enabled(settings)
+    rooms = room_yolo_ready(settings)
+    room_weights = resolve_room_weights(settings) if rooms else None
     walls = wall_yolo_ready(settings)
     rf = roboflow_ready(settings)
     rf_local = roboflow_local_ready(settings)
@@ -220,7 +229,7 @@ def health() -> HealthResponse:
         yolo_ready=ready,
         yolo_weights=settings.yolo_weights if ready else None,
         room_ready=rooms,
-        yolo_room_weights=settings.yolo_room_weights if rooms else None,
+        yolo_room_weights=room_weights,
         wall_ready=walls or rf or mitunet or legacy,
         yolo_wall_weights=settings.yolo_wall_weights if walls else None,
         mitunet_ready=mitunet,
@@ -244,7 +253,35 @@ def health() -> HealthResponse:
 def list_policies() -> dict:
     from app.pipeline.policy_engine import list_policy_packs
 
-    return {"policies": list_policy_packs(), "default": "highlife_v1"}
+    return {"policies": list_policy_packs(), "default": "hooper_apartment_rules_v1"}
+
+
+class PolicyPageImage(BaseModel):
+    pageNumber: int
+    image: str
+
+
+class PolicyFromTextBody(BaseModel):
+    text: str = ""
+    fileName: str | None = None
+    format: str | None = None
+    pages: list[PolicyPageImage] | None = None
+
+
+@app.post("/v1/policy/from-text")
+def policy_from_text(body: PolicyFromTextBody) -> dict:
+    from app.pipeline.policy_ingest import ingest_policy_text
+
+    try:
+        pack, provider = ingest_policy_text(
+            body.text,
+            file_name=body.fileName,
+            fmt=body.format,
+            pages=[{"pageNumber": p.pageNumber, "image": p.image} for p in body.pages or []],
+        )
+    except (ValueError, Exception) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True, "provider": provider, "pack": pack}
 
 
 @app.post("/v1/analyze", response_model=AnalyzeResponse)
@@ -342,7 +379,7 @@ def analyze(body: AnalyzeRequest) -> AnalyzeResponse:
 async def ocr_page(
     file: UploadFile = File(...),
     profile: str = Form("default"),
-    use_doc_orientation_classify: bool = Form(True),
+    use_doc_orientation_classify: bool = Form(False),
     use_doc_unwarping: bool = Form(False),
     use_textline_orientation: bool = Form(True),
     text_rec_score_thresh: float = Form(0.5),
@@ -354,12 +391,15 @@ async def ocr_page(
     pipeline_version: str = Form(""),
     use_layout_detection: bool | None = Form(None),
     vl_max_side: int | None = Form(None),
+    tile_title_block: bool | None = Form(None),
+    tile_drawing: bool | None = Form(None),
 ):
     """
     Local PaddleOCR on a page raster.
 
     ``profile``: ``default`` (title block) or ``dense`` (drawing area — higher det resolution).
     ``backend``: ``classic`` (PP-OCR) or ``vl`` (PaddleOCR-VL 0.9B). Empty uses PADDLE_OCR_BACKEND.
+    ``tile_title_block`` / ``tile_drawing``: classic PP-OCR overlapping tiles (both default off).
 
     Returns parsed sheet metadata (scale, level, title, unit ids) plus raw lines.
     Requires PaddleOCR in .venv-ocr (or PADDLE_OCR_PYTHON) and PADDLE_OCR_ENABLED=true
@@ -404,6 +444,8 @@ async def ocr_page(
             pipeline_version=pipeline_version,
             use_layout_detection=use_layout_detection,
             vl_max_side=vl_max_side,
+            tile_title_block=tile_title_block,
+            tile_drawing=tile_drawing,
         )
 
         meta = extract_sheet_context_paddle(
@@ -428,7 +470,7 @@ async def ocr_page_stream(
     request: Request,
     file: UploadFile = File(...),
     profile: str = Form("default"),
-    use_doc_orientation_classify: bool = Form(True),
+    use_doc_orientation_classify: bool = Form(False),
     use_doc_unwarping: bool = Form(False),
     use_textline_orientation: bool = Form(True),
     text_rec_score_thresh: float = Form(0.5),
@@ -440,6 +482,8 @@ async def ocr_page_stream(
     pipeline_version: str = Form(""),
     use_layout_detection: bool | None = Form(None),
     vl_max_side: int | None = Form(None),
+    tile_title_block: bool | None = Form(None),
+    tile_drawing: bool | None = Form(None),
 ):
     """Same as /v1/ocr/page but streams tile windows as SSE (text/event-stream)."""
     from app.pipeline.paddle_ocr import (
@@ -486,6 +530,8 @@ async def ocr_page_stream(
         pipeline_version=pipeline_version,
         use_layout_detection=use_layout_detection,
         vl_max_side=vl_max_side,
+        tile_title_block=tile_title_block,
+        tile_drawing=tile_drawing,
     )
 
     queue: asyncio.Queue[tuple[str, dict[str, Any]] | None] = asyncio.Queue()
@@ -576,7 +622,7 @@ async def ocr_pdf(
     dpi: int = Form(300),
     page_numbers: str = Form(""),
     page_crops: str = Form(""),
-    use_doc_orientation_classify: bool = Form(True),
+    use_doc_orientation_classify: bool = Form(False),
     use_doc_unwarping: bool = Form(False),
     use_textline_orientation: bool = Form(True),
     text_rec_score_thresh: float = Form(0.5),
@@ -588,6 +634,8 @@ async def ocr_pdf(
     pipeline_version: str = Form(""),
     use_layout_detection: bool | None = Form(None),
     vl_max_side: int | None = Form(None),
+    tile_title_block: bool | None = Form(None),
+    tile_drawing: bool | None = Form(None),
 ):
     """
     Rasterize PDF pages at ``dpi`` (default 300) and run PaddleOCR on each page.
@@ -661,6 +709,8 @@ async def ocr_pdf(
             pipeline_version=pipeline_version,
             use_layout_detection=use_layout_detection,
             vl_max_side=vl_max_side,
+            tile_title_block=tile_title_block,
+            tile_drawing=tile_drawing,
         )
 
         pages = ocr_pdf_pages(
@@ -683,13 +733,13 @@ async def ocr_pdf(
 
 @app.get("/v1/detect/models")
 def detect_models() -> dict:
-    """Models the user can pick for Detect (built-in wall backends + Studio fine-tunes)."""
+    """Models the user can pick for Detect (wall / room / object tasks + Studio fine-tunes)."""
     settings = get_settings()
     models = list_detect_models(settings)
     return {
         "models": models,
         "default": default_detect_model(settings),
-        "wall_backend": settings.wall_backend,
+        "wall_backend": WALL_BACKEND,
     }
 
 
@@ -716,6 +766,16 @@ def _parse_drawing_crop(raw: str | None) -> dict[str, float] | None:
     return {"x": x, "y": y, "width": width, "height": height}
 
 
+def _parse_json_list(raw: str) -> list | None:
+    if not raw or not str(raw).strip():
+        return None
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    return parsed if isinstance(parsed, list) else None
+
+
 @app.post("/v1/detect")
 async def detect(
     file: UploadFile = File(...),
@@ -724,6 +784,10 @@ async def detect(
     modelId: str | None = Form(default=None),
     detectModel: str | None = Form(default=None),
     drawingCrop: str = Form(""),
+    tileWalls: str = Form(""),
+    wallImgsz: str = Form(""),
+    wallThreshold: str = Form(""),
+    tileOverlap: str = Form(""),
 ):
     """Walls/fixtures on the full page, or a selected wall backend / Studio model."""
     name = file.filename or "page.png"
@@ -747,6 +811,10 @@ async def detect(
             detect_model=detectModel,
             model_id=modelId,
             drawing_crop=_parse_drawing_crop(drawingCrop),
+            tile_walls=tileWalls,
+            wall_imgsz=wallImgsz,
+            wall_threshold=wallThreshold,
+            tile_overlap=tileOverlap,
         )
     except HTTPException:
         raise
@@ -786,6 +854,69 @@ async def detect(
     )
 
 
+@app.post("/v1/geometry/extract", response_model=DetectResponse)
+async def geometry_extract(
+    file: UploadFile = File(...),
+    originalWidth: int | None = Form(default=None),
+    originalHeight: int | None = Form(default=None),
+    unitPolygons: str = Form(""),
+    openings: str = Form(""),
+):
+    """Per-unit wall-bounded rooms. Composes existing wall/room predict; Detect is unchanged."""
+    name = file.filename or "page.png"
+    mime = (file.content_type or "").split(";")[0].strip().lower()
+    if mime == "image/jpg":
+        mime = "image/jpeg"
+    if mime not in {"image/png", "image/jpeg", "image/webp"} and not name.lower().endswith(
+        (".png", ".jpg", ".jpeg", ".webp")
+    ):
+        return _error(415, "UNSUPPORTED_MEDIA_TYPE", "Geometry extract expects a PNG, JPEG, or WEBP page raster.")
+
+    data = await file.read()
+    if not data:
+        return _error(400, "EMPTY_FILE", "No image bytes received.")
+
+    try:
+        regions, width_px, height_px, warning = extract_from_image(
+            data,
+            original_width=originalWidth,
+            original_height=originalHeight,
+            unit_polygons=_parse_json_list(unitPolygons),
+            openings=_parse_json_list(openings),
+        )
+    except FileNotFoundError as exc:
+        return _error(503, "GEOMETRY_WEIGHTS_MISSING", str(exc))
+    except Exception as exc:
+        return _error(422, "GEOMETRY_EXTRACT_FAILED", "Geometry extract failed on this page.", {"reason": str(exc)})
+
+    serialized = [serialize_region(r) for r in regions]
+    return DetectResponse(
+        modelId="geometry:wall_bounded",
+        modelVersion="0.1.0",
+        widthPx=width_px,
+        heightPx=height_px,
+        warning=warning,
+        device=None,
+        regions=[
+            DetectedRegionOut(
+                id=region["id"],
+                type=region["type"],
+                label=region["label"],
+                confidence=region["confidence"],
+                polygonPx=[PointOut(x=p["x"], y=p["y"]) for p in region["polygonPx"]],
+                bboxPx=BBoxOut(
+                    x=region["bboxPx"]["x"],
+                    y=region["bboxPx"]["y"],
+                    width=region["bboxPx"]["width"],
+                    height=region["bboxPx"]["height"],
+                ),
+                attributes=region.get("attributes") or {},
+            )
+            for region in serialized
+        ],
+    )
+
+
 @app.post("/v1/detect/stream")
 async def detect_stream(
     request: Request,
@@ -795,6 +926,10 @@ async def detect_stream(
     modelId: str | None = Form(default=None),
     detectModel: str | None = Form(default=None),
     drawingCrop: str = Form(""),
+    tileWalls: str = Form(""),
+    wallImgsz: str = Form(""),
+    wallThreshold: str = Form(""),
+    tileOverlap: str = Form(""),
 ):
     """Same as /v1/detect but streams tile progress as SSE (text/event-stream)."""
     name = file.filename or "page.png"
@@ -830,6 +965,10 @@ async def detect_stream(
                 detect_model=detectModel,
                 model_id=modelId,
                 drawing_crop=_parse_drawing_crop(drawingCrop),
+                tile_walls=tileWalls,
+                wall_imgsz=wallImgsz,
+                wall_threshold=wallThreshold,
+                tile_overlap=tileOverlap,
                 on_progress=on_progress,
                 cancel_check=cancel.is_set,
             )

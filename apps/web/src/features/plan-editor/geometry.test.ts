@@ -1,5 +1,22 @@
 import { describe, expect, it } from "vitest";
-import { hitTestGeometry, pointInPolygon } from "./geometry";
+import { entitiesInRect, hitTestGeometry, pointInPolygon } from "./geometry";
+import type { OverlayEntity } from "./types";
+
+function fakeEntity(id: string, x: number, y: number, width: number, height: number): OverlayEntity {
+  return {
+    id,
+    type: "room",
+    layer: "rooms",
+    geometry: { kind: "rect", x, y, width, height },
+    label: id,
+    confidence: 1,
+    status: "accepted",
+    source: "model",
+    attributes: {},
+    createdAt: "",
+    updatedAt: "",
+  };
+}
 
 describe("overlay hit tests", () => {
   it("detects a point inside a polygon", () => {
@@ -29,5 +46,12 @@ describe("overlay hit tests", () => {
     const geometry = { kind: "rect" as const, x: 10, y: 10, width: 20, height: 30 };
     expect(hitTestGeometry({ x: 15, y: 20 }, geometry, 2)).toBe(true);
     expect(hitTestGeometry({ x: 0, y: 0 }, geometry, 2)).toBe(false);
+  });
+
+  it("selects overlays whose boxes meet a marquee", () => {
+    const a = fakeEntity("a", 10, 10, 20, 20);
+    const b = fakeEntity("b", 80, 80, 10, 10);
+    const hit = entitiesInRect([a, b], { x: 15, y: 15, width: 30, height: 30 });
+    expect(hit.map((e) => e.id)).toEqual(["a"]);
   });
 });

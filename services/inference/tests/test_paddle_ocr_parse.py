@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from app.pipeline.paddle_ocr import (
     crop_rgb_normalized,
+    ocr_worker_exit_error,
+    ocr_worker_popen_kwargs,
     parse_level_name,
     parse_unit_ids,
     pick_scale_from_lines,
@@ -21,7 +23,12 @@ def test_parse_level_and_units() -> None:
     assert parse_level_name("Second Floor Plan") == "Second Floor Plan"
     assert "12B" in parse_unit_ids(text)
     assert "101" in parse_unit_ids("Unit 101 ")
+    assert parse_unit_ids("apartment 37  U34  APT 203") == ["37", "34", "203"]
     assert parse_unit_ids("UNIT PLAN") == []
+    assert parse_unit_ids("37  203") == []
+    assert parse_unit_ids("apartment EN") == []
+    assert parse_unit_ids("UNIT CT") == []
+    assert parse_unit_ids("Unit A") == ["A"]
 
 
 def test_upsample_small_ocr_crop_to_paddle_default() -> None:
@@ -166,3 +173,64 @@ def test_pick_scale_merges_ratio_and_at_paper_size() -> None:
     meta = sheet_meta_from_ocr_lines(lines)
     assert meta["scaleText"] == "1:100 @ A1"
     assert meta.get("paperSize") == "A1"
+
+
+def test_classic_predict_disables_doc_warp_and_uses_max_side() -> None:
+    from app.pipeline.paddle_ocr_worker import _normalize_result, classic_predict_kwargs
+
+    kw = classic_predict_kwargs(
+        det_limit_side_len=2048,
+        det_db_thresh=0.25,
+        use_doc_orientation_classify=False,
+        use_doc_unwarping=False,
+        use_textline_orientation=True,
+        text_rec_score_thresh=0.5,
+    )[0]
+    assert kw["use_doc_orientation_classify"] is False
+    assert kw["use_doc_unwarping"] is False
+    assert kw["text_det_limit_side_len"] == 2048
+    assert kw["text_det_limit_type"] == "max"
+
+    lines = _normalize_result(
+        [
+            {
+                "rec_texts": ["BALCONY"],
+                "rec_scores": [0.94],
+                "rec_polys": [[[10.0, 20.0], [80.0, 20.0], [80.0, 36.0], [10.0, 36.0]]],
+            }
+        ]
+    )
+    assert lines[0]["text"] == "BALCONY"
+    assert lines[0]["bbox"][0] == [10.0, 20.0]
+    assert kw["use_queues"] is False
+
+
+def test_worker_exit_error_explains_keyboard_interrupt() -> None:
+    msg = ocr_worker_exit_error(
+        [
+            'File ".../runner.py", line 265, in __call__',
+            "self.predictor.run()",
+            "KeyboardInterrupt",
+        ],
+        1,
+    )
+    assert "interrupted" in msg.lower()
+    assert "KeyboardInterrupt" in msg
+    assert "without results" not in msg
+
+
+def test_worker_exit_error_keeps_generic_crash() -> None:
+    msg = ocr_worker_exit_error(["some paddle log line"], 1)
+    assert "finished without results" in msg
+    assert "some paddle log line" in msg
+
+
+def test_ocr_worker_popen_isolates_console_signals() -> None:
+    import os
+    import subprocess
+
+    kw = ocr_worker_popen_kwargs()
+    if os.name == "nt":
+        assert kw["creationflags"] == subprocess.CREATE_NEW_PROCESS_GROUP
+    else:
+        assert kw["start_new_session"] is True

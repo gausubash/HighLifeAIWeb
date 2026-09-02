@@ -20,26 +20,26 @@ import {
   type StudioBaseModel,
 } from "@/lib/studio/studioClient";
 import {
-  basesForDatasetCategory,
   categoryLabel,
   FALLBACK_DATASET_CATEGORIES,
+  groupBaseModelsByCategory,
   type StudioDatasetCategorySpec,
 } from "@/lib/studio/categories";
 import type { MlDataset, MlModel, MlTrainingJob } from "@/lib/studio/types";
 import { classSwatch, hexToRgba } from "@/features/plan-editor/styles";
 import { StudioAnnotateTab } from "./StudioAnnotateTab";
 import { StudioDatasetsTab } from "./StudioDatasetsTab";
-import { StudioSidebar } from "./StudioSidebar";
+import { StudioActivityRail } from "./StudioActivityRail";
 import type { StudioTabId } from "./StudioTabBar";
 import { StudioTilesTab } from "./StudioTilesTab";
 import { TrainingMonitor } from "./TrainingMonitor";
 import { useStudioNavStore } from "./useStudioNavStore";
+import { downloadStudioBakeBundle } from "@/lib/studio/exportBakeBundle";
 
 type Tab = StudioTabId;
 
 const FALLBACK_DETECT = [
   "yolo_layout.pt",
-  "yolo_walls_obb.pt",
   "yolo_room.pt",
   "yolov8n.pt",
   "yolov8s.pt",
@@ -51,9 +51,6 @@ const FALLBACK_DETECT = [
   "yolo11m.pt",
   "yolo11l.pt",
   "yolo11x.pt",
-  "retinanet_latest.pth",
-  "faster_rcnn_latest.pth",
-  "cascade_swin_latest.pth",
 ];
 const FALLBACK_SEG = [
   "mitunet_walls.pth",
@@ -67,8 +64,6 @@ const FALLBACK_SEG = [
   "yolo11m-seg.pt",
   "yolo11l-seg.pt",
   "yolo11x-seg.pt",
-  "deeplab_walls_best.h5",
-  "unet_walls_best.h5",
 ];
 
 function baseModelLabel(item: string, catalog?: StudioBaseModel[]): string {
@@ -87,6 +82,7 @@ function baseModelLabel(item: string, catalog?: StudioBaseModel[]): string {
   if (item === "yolo_room.pt") return "Architect room & fixtures (YOLO)";
   if (item === "mitunet_walls.pth") return "MitUNet walls (PyTorch)";
   if (item.endsWith("-seg.pt")) return `YOLO segment · ${item.replace(".pt", "")}`;
+  if (item.endsWith("-pose.pt")) return `YOLO pose · ${item.replace(".pt", "")}`;
   if (item.endsWith(".pt")) return `YOLO detect · ${item.replace(".pt", "")}`;
   return item;
 }
@@ -100,7 +96,9 @@ function defaultBaseForDataset(
     specs.find((c) => c.id === dataset.category) ??
     FALLBACK_DATASET_CATEGORIES.find((c) => c.id === dataset.category);
   if (spec) return spec.default_base;
-  return dataset.task === "segment" ? "yolov8n-seg.pt" : "yolov8n.pt";
+  if (dataset.task === "segment") return "yolov8n-seg.pt";
+  if (dataset.task === "pose") return "yolo26n-pose.pt";
+  return "yolov8n.pt";
 }
 
 function defaultFineTunedModelName(base: string, when = new Date()): string {
@@ -231,56 +229,15 @@ export function StudioPageClient() {
     [datasets, datasetId],
   );
 
-  const bases = useMemo(() => {
-    const task = selectedDataset?.task ?? "segment";
-    const fromApi = basesForDatasetCategory(
-      baseCatalog,
-      task,
-      selectedDataset?.category,
-    );
-    if (fromApi.length) return fromApi;
-    return task === "segment" ? FALLBACK_SEG : FALLBACK_DETECT;
-  }, [baseCatalog, selectedDataset?.task, selectedDataset?.category]);
+  const allBaseIds = useMemo(() => {
+    if (baseCatalog.length) return baseCatalog.map((m) => m.id);
+    return [...FALLBACK_DETECT, ...FALLBACK_SEG];
+  }, [baseCatalog]);
 
-  const basesByCategory = useMemo(() => {
-    const task = selectedDataset?.task ?? "segment";
-    const dsCategory = selectedDataset?.category;
-    const items = baseCatalog.filter((m) => m.task === task);
-    const specs = categorySpecs.filter((s) => s.task === task);
-    const relevantSpecs = dsCategory
-      ? specs.filter((s) => s.id === dsCategory || s.id.startsWith("general_"))
-      : specs;
-
-    if (!items.length) {
-      if (dsCategory) {
-        const spec = specs.find((s) => s.id === dsCategory);
-        return [{ id: dsCategory, label: spec?.label ?? categoryLabel(dsCategory), ids: bases }];
-      }
-      return [{ id: "all", label: "Available", ids: bases }];
-    }
-
-    const groups = relevantSpecs
-      .map((spec) => ({
-        id: spec.id,
-        label: spec.label,
-        ids: items.filter((m) => m.category === spec.id).map((m) => m.id),
-      }))
-      .filter((g) => g.ids.length > 0);
-
-    if (groups.length) return groups;
-
-    const byCat = new Map<string, string[]>();
-    for (const m of items) {
-      const cat = m.category ?? "other";
-      if (!byCat.has(cat)) byCat.set(cat, []);
-      byCat.get(cat)!.push(m.id);
-    }
-    return Array.from(byCat.entries()).map(([id, ids]) => ({
-      id,
-      label: categoryLabel(id),
-      ids,
-    }));
-  }, [baseCatalog, bases, categorySpecs, selectedDataset?.category, selectedDataset?.task]);
+  const basesByCategory = useMemo(
+    () => groupBaseModelsByCategory(baseCatalog, categorySpecs, allBaseIds),
+    [allBaseIds, baseCatalog, categorySpecs],
+  );
 
   const modelsByCategory = useMemo(() => {
     const order = categorySpecs.map((c) => c.id);
@@ -301,18 +258,13 @@ export function StudioPageClient() {
   }, [models, categorySpecs]);
 
   useEffect(() => {
-    if (!bases.length) return;
-    const runnable = bases.filter((id) => {
-      const meta = baseCatalog.find((m) => m.id === id);
-      return meta?.runnable !== false && meta?.ready !== false;
-    });
-    const pool = runnable.length ? runnable : bases;
-    if (!pool.includes(baseModel)) {
-      const next = pool[0];
-      setBaseModel(next);
-      if (!modelNameTouched) setModelName(defaultFineTunedModelName(next));
-    }
-  }, [baseCatalog, baseModel, bases, modelNameTouched]);
+    if (!allBaseIds.length) return;
+    if (allBaseIds.includes(baseModel)) return;
+    const preferred = defaultBaseForDataset(selectedDataset, categorySpecs);
+    const next = allBaseIds.includes(preferred) ? preferred : allBaseIds[0];
+    setBaseModel(next);
+    if (!modelNameTouched) setModelName(defaultFineTunedModelName(next));
+  }, [allBaseIds, baseModel, categorySpecs, modelNameTouched, selectedDataset]);
 
   const monitoredJob = useMemo(() => {
     if (watchJobId) {
@@ -506,12 +458,12 @@ export function StudioPageClient() {
     inferAbortRef.current?.abort();
   };
 
-  const studioSidebar = <StudioSidebar active={tab} onChange={setTab} />;
+  const studioActivityRail = <StudioActivityRail active={tab} onChange={setTab} />;
 
   if (tab === "datasets") {
     return (
       <StudioDatasetsTab
-        sidebar={studioSidebar}
+        activityRail={studioActivityRail}
         initialDatasetId={datasetId || undefined}
         onAnnotate={(id) => {
           setDatasetId(id);
@@ -533,7 +485,7 @@ export function StudioPageClient() {
   if (tab === "annotate") {
     return (
       <StudioAnnotateTab
-        sidebar={studioSidebar}
+        activityRail={studioActivityRail}
         initialDatasetId={datasetId || undefined}
         onOpenTrain={(id) => {
           setDatasetId(id);
@@ -555,7 +507,7 @@ export function StudioPageClient() {
   if (tab === "tiles") {
     return (
       <StudioTilesTab
-        sidebar={studioSidebar}
+        activityRail={studioActivityRail}
         initialDatasetId={datasetId || undefined}
         onAnnotate={(id) => {
           setDatasetId(id);
@@ -572,11 +524,9 @@ export function StudioPageClient() {
 
   return (
     <WorkspaceShell
-      showSidebar
       hideTopBar
       allowNewProjectShortcut={false}
-      sidebar={studioSidebar}
-      statusText={loading ? "Loading Model Studio…" : `${datasets.length} datasets · ${models.length} models`}
+      activityRail={studioActivityRail}
     >
       <div className="flex h-full min-h-0 flex-col bg-white">
         {error && (
@@ -593,9 +543,9 @@ export function StudioPageClient() {
               <section className="card space-y-3">
                 <h2 className="text-sm font-semibold">Start fine-tune</h2>
                 <p className="text-xs text-slate-500">
-                  Training reads labelled pages from this PC (uvicorn :8000). Bases are grouped by
-                  model purpose — layout analysis, wall detection, wall segmentation, and so on.
-                  Domain models (GreenMap layout/walls, Architect rooms) download on first train.
+                  Training reads labelled pages from this PC (uvicorn :8000). All catalog
+                  bases are listed; models that do not match this dataset&apos;s task
+                  (detect vs segment) or are not ready stay disabled.
                 </p>
                 <label className="block text-xs font-medium text-slate-600">
                   Dataset
@@ -636,10 +586,16 @@ export function StudioPageClient() {
                       <optgroup key={group.id} label={group.label}>
                         {group.ids.map((item) => {
                           const meta = baseCatalog.find((m) => m.id === item);
-                          const disabled = meta?.runnable === false || meta?.ready === false;
+                          const taskMismatch = Boolean(
+                            meta && selectedDataset && meta.task !== selectedDataset.task,
+                          );
+                          const disabled =
+                            meta?.runnable === false || meta?.ready === false || taskMismatch;
+                          const suffix = taskMismatch ? ` (${meta?.task} only)` : "";
                           return (
                             <option key={item} value={item} disabled={disabled}>
                               {baseModelLabel(item, baseCatalog)}
+                              {suffix}
                             </option>
                           );
                         })}
@@ -647,7 +603,7 @@ export function StudioPageClient() {
                     ))}
                   </select>
                   {baseCatalog.some((m) => m.family === "floordata" && m.runnable === false) ? (
-                    <span className="mt-1 block text-[11px] font-normal text-amber-700">
+                    <span className="mt-1 block text-[13px] font-normal text-amber-700">
                       floorData needs the TensorFlow venv at{" "}
                       <code className="rounded bg-amber-50 px-1">services/inference/.venv-tf</code>{" "}
                       (Python 3.10–3.12 +{" "}
@@ -655,7 +611,7 @@ export function StudioPageClient() {
                       ). Training still runs from the main uvicorn process via that interpreter.
                     </span>
                   ) : baseCatalog.some((m) => m.family === "floordata" && m.runnable !== false) ? (
-                    <span className="mt-1 block text-[11px] font-normal text-slate-500">
+                    <span className="mt-1 block text-[13px] font-normal text-slate-500">
                       floorData trains in the dedicated TensorFlow venv (
                       <code className="rounded bg-slate-100 px-1">.venv-tf</code>
                       ).
@@ -674,7 +630,7 @@ export function StudioPageClient() {
                       setModelNameTouched(true);
                     }}
                   />
-                  <span className="mt-1 block text-[11px] font-normal text-slate-500">
+                  <span className="mt-1 block text-[13px] font-normal text-slate-500">
                     Defaults to base name + today’s date and time. Edit freely before starting.
                   </span>
                 </label>
@@ -734,7 +690,7 @@ export function StudioPageClient() {
                           <span className="font-medium">{job.task}</span>
                           <span className="text-xs uppercase text-slate-500">{job.status}</span>
                         </button>
-                        <p className="mt-1 text-[11px] text-slate-500">
+                        <p className="mt-1 text-[13px] text-slate-500">
                           {job.base_model} · {job.epochs} ep · batch {job.batch}
                         </p>
                         <div className="mt-2 h-1.5 overflow-hidden rounded bg-slate-100">
@@ -743,11 +699,11 @@ export function StudioPageClient() {
                             style={{ width: `${Math.min(100, job.progress)}%` }}
                           />
                         </div>
-                        {job.log_tail && <p className="mt-1 text-[11px] text-slate-600">{job.log_tail}</p>}
-                        {job.error && <p className="mt-1 text-[11px] text-red-700">{job.error}</p>}
+                        {job.log_tail && <p className="mt-1 text-[13px] text-slate-600">{job.log_tail}</p>}
+                        {job.error && <p className="mt-1 text-[13px] text-red-700">{job.error}</p>}
                         <div className="mt-2 flex items-center justify-between gap-2">
                           {watchJobId === job.id ? (
-                            <p className="text-[10px] text-brand-700">Showing in monitor ↑</p>
+                            <p className="text-xs text-brand-700">Showing in monitor ↑</p>
                           ) : (
                             <span />
                           )}
@@ -803,11 +759,18 @@ export function StudioPageClient() {
                           >
                             <div>
                               <p className="text-sm font-medium">{model.name}</p>
-                              <p className="text-[11px] text-slate-500">
+                              <p className="text-[13px] text-slate-500">
                                 {model.task} · {model.architecture} · {model.class_names.join(", ")}
                               </p>
                             </div>
                             <div className="flex shrink-0 items-center gap-2">
+                              <button
+                                type="button"
+                                className="rounded border border-slate-300 px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50"
+                                onClick={() => downloadStudioBakeBundle(model)}
+                              >
+                                Bake JSON
+                              </button>
                               <button
                                 type="button"
                                 className={
@@ -898,7 +861,7 @@ export function StudioPageClient() {
                   {/* Zoom & Overlay Toolbar */}
                   <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs">
                     <div className="flex items-center gap-1">
-                      <span className="text-[11px] font-medium text-slate-500 mr-1">Zoom:</span>
+                      <span className="text-[13px] font-medium text-slate-500 mr-1">Zoom:</span>
                       <button
                         type="button"
                         onClick={() => setInferZoom((z) => Math.max(0.25, Number((z - 0.25).toFixed(2))))}
@@ -923,7 +886,7 @@ export function StudioPageClient() {
                       <button
                         type="button"
                         onClick={() => setInferZoom(1)}
-                        className="ml-1 rounded border border-slate-300 bg-white px-2 py-0.5 text-[11px] text-slate-600 hover:bg-slate-100"
+                        className="ml-1 rounded border border-slate-300 bg-white px-2 py-0.5 text-[13px] text-slate-600 hover:bg-slate-100"
                         title="Reset zoom to 100%"
                       >
                         100%
@@ -931,7 +894,7 @@ export function StudioPageClient() {
                       <button
                         type="button"
                         onClick={() => setInferZoom(0.5)}
-                        className="rounded border border-slate-300 bg-white px-1.5 py-0.5 text-[11px] text-slate-600 hover:bg-slate-100"
+                        className="rounded border border-slate-300 bg-white px-1.5 py-0.5 text-[13px] text-slate-600 hover:bg-slate-100"
                         title="Fit view (50%)"
                       >
                         50%
@@ -939,7 +902,7 @@ export function StudioPageClient() {
                       <button
                         type="button"
                         onClick={() => setInferZoom(1.5)}
-                        className="rounded border border-slate-300 bg-white px-1.5 py-0.5 text-[11px] text-slate-600 hover:bg-slate-100"
+                        className="rounded border border-slate-300 bg-white px-1.5 py-0.5 text-[13px] text-slate-600 hover:bg-slate-100"
                         title="Zoom 150%"
                       >
                         150%
@@ -951,14 +914,14 @@ export function StudioPageClient() {
                         <button
                           type="button"
                           onClick={() => setHiddenClasses(new Set())}
-                          className="rounded px-2 py-0.5 text-[11px] font-medium text-brand-700 hover:bg-brand-50"
+                          className="rounded px-2 py-0.5 text-[13px] font-medium text-brand-700 hover:bg-brand-50"
                         >
                           Show all
                         </button>
                         <button
                           type="button"
                           onClick={() => setHiddenClasses(new Set(inferLegends.map((l) => l.label)))}
-                          className="rounded px-2 py-0.5 text-[11px] font-medium text-slate-600 hover:bg-slate-200"
+                          className="rounded px-2 py-0.5 text-[13px] font-medium text-slate-600 hover:bg-slate-200"
                         >
                           Hide all
                         </button>
@@ -969,7 +932,7 @@ export function StudioPageClient() {
                   {/* Class Legends Bar */}
                   {inferLegends.length > 0 && (
                     <div className="flex flex-wrap items-center gap-1.5 rounded-md border border-slate-200 bg-white p-2 text-xs">
-                      <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 mr-1">
+                      <span className="text-[13px] font-semibold uppercase tracking-wide text-slate-500 mr-1">
                         Legends:
                       </span>
                       {inferLegends.map((item) => {
@@ -993,7 +956,7 @@ export function StudioPageClient() {
                             onMouseEnter={() => setHoveredClass(item.label)}
                             onMouseLeave={() => setHoveredClass(null)}
                             className={cn(
-                              "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-medium transition-all",
+                              "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[13px] font-medium transition-all",
                               isHidden
                                 ? "border-slate-200 bg-slate-100 text-slate-400 line-through opacity-60"
                                 : isHovered
@@ -1009,7 +972,7 @@ export function StudioPageClient() {
                             <span>{item.label}</span>
                             <span
                               className={cn(
-                                "rounded px-1 text-[10px] font-semibold",
+                                "rounded px-1 text-xs font-semibold",
                                 isHidden ? "bg-slate-200 text-slate-500" : "bg-white text-slate-600",
                               )}
                             >
@@ -1024,24 +987,34 @@ export function StudioPageClient() {
                   {/* Scrollable & Zoomable Image Viewport */}
                   <div className="relative max-h-[32rem] min-h-[16rem] w-full overflow-auto rounded-lg border border-slate-200 bg-slate-900/5 p-2">
                     <div
-                      className="relative inline-block transition-transform duration-75"
-                      style={{
-                        transform: `scale(${inferZoom})`,
-                        transformOrigin: "top left",
-                      }}
+                      className="relative inline-block"
+                      style={
+                        inferSize
+                          ? {
+                              width: inferSize.width * inferZoom,
+                              height: inferSize.height * inferZoom,
+                            }
+                          : undefined
+                      }
                     >
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
                         src={inferPreview}
                         alt="Inference preview"
                         className="block max-h-none max-w-none rounded shadow-sm"
-                        style={{ display: "block" }}
+                        style={
+                          inferSize
+                            ? { width: "100%", height: "100%", display: "block" }
+                            : { display: "block", width: `${inferZoom * 100}%` }
+                        }
                       />
                       {inferSize ? (
                         <svg
                           className="pointer-events-auto absolute inset-0 h-full w-full"
                           viewBox={`0 0 ${inferSize.width} ${inferSize.height}`}
                           preserveAspectRatio="none"
+                          shapeRendering="geometricPrecision"
+                          textRendering="geometricPrecision"
                         >
                           {inferTile ? (
                             <rect
@@ -1132,7 +1105,7 @@ export function StudioPageClient() {
                       <span className="text-slate-300">
                         Confidence: {(inferRegions[hoveredRegionIndex].confidence * 100).toFixed(1)}%
                       </span>
-                      <span className="text-slate-400 text-[11px] font-mono">
+                      <span className="text-slate-400 text-[13px] font-mono">
                         Box: {Math.round(inferRegions[hoveredRegionIndex].bboxPx.width)}×{Math.round(inferRegions[hoveredRegionIndex].bboxPx.height)} px
                       </span>
                     </div>

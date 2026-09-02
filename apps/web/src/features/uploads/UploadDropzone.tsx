@@ -26,7 +26,7 @@ export function UploadDropzone({ projectId, onComplete }: UploadDropzoneProps) {
   } = usePdfUpload({ projectId, onComplete });
 
   return (
-    <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+    <div className="hl-block p-4">
       <h2 className="mb-1 text-sm font-semibold text-slate-900">Upload floor plan</h2>
       <p className="mb-3 text-xs text-slate-600">
         PDF, PNG, JPG, or WEBP, max 50 MB. PDFs are rasterized to page images at your chosen DPI.
@@ -47,7 +47,7 @@ export function UploadDropzone({ projectId, onComplete }: UploadDropzoneProps) {
           onChange={(e) => setPdfDpi(e.target.value)}
           onClick={(e) => e.stopPropagation()}
         />
-        <span className="font-normal text-[11px] text-slate-500">
+        <span className="font-normal text-[13px] text-slate-500">
           {PDF_UPLOAD_DPI_MIN}–{PDF_UPLOAD_DPI_MAX} DPI. Default {PDF_RENDER_DPI}. Used when
           converting PDF pages to images; ignored for PNG/JPG uploads.
         </span>

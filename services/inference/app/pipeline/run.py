@@ -108,11 +108,12 @@ def _openings_from_graph(graph: dict[str, Any]) -> list[OpeningSchema]:
         if len(poly) < 3:
             continue
         eid = str(entity["id"])
+        attrs = entity.get("attributes") or {}
         openings.append(
             OpeningSchema(
                 id=eid,
-                external_id=str((entity.get("attributes") or {}).get("label") or et),
-                opening_type=et,
+                external_id=str(attrs.get("label") or et),
+                opening_type=str(attrs.get("openingType") or et),
                 geometry=poly,
                 from_space_id=access.get(eid),
                 confidence=float(entity.get("confidence") or 0.5),

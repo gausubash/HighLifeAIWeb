@@ -1,24 +1,88 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import {
   DetectStreamCancelled,
   detectPageRegionsStream,
   LAYOUT_DETECT_MODEL,
   type DetectTileRect,
 } from "@/lib/api/floorPlanClient";
-import { findDrawingAreaCrop } from "@/lib/scale/layoutRegionCrop";
+import { findDrawingAreaCrop, findTitleBlockCrop } from "@/lib/scale/layoutRegionCrop";
 import { resolvePageImagePath } from "@/lib/pdf/pageImageStore";
 import { projectStore } from "@/lib/data/projectStore";
+import type { PageOcrMeta } from "@highlife/shared-types";
 import {
   readStoredDetectModel,
   writeStoredDetectModel,
 } from "./DetectModelSelect";
+import { DEFAULT_DETECT_MODEL_BY_PERSIST_KEY } from "./DetectModelSelect";
+import {
+  detectTaskFromModelId,
+  replaceTypesForDetectTask,
+} from "./detectTask";
+import { familyFromDetectTask, useDetectModelSettingsStore } from "./useDetectModelSettingsStore";
+import { resolveNorthDetectCrop } from "./northCropScope";
+import type { DetectModelOption } from "@/lib/api/floorPlanClient";
 import { detectedRegionToOverlay } from "./detectedToOverlay";
 import { isLayoutEntity } from "./layoutRegionClasses";
 import { rasterBlobForDetect } from "./rasterBlobForDetect";
 import { pageKey, useOverlayStore } from "./useOverlayStore";
 import type { OverlayEntity } from "./types";
+
+export type DetectFamilyCounts = {
+  walls: number;
+  rooms: number;
+  openings: number;
+  objects: number;
+  north: number;
+  structural: number;
+};
+
+const EMPTY_FAMILY_COUNTS: DetectFamilyCounts = {
+  walls: 0,
+  rooms: 0,
+  openings: 0,
+  objects: 0,
+  north: 0,
+  structural: 0,
+};
+
+function isStructuralEntity(e: OverlayEntity): boolean {
+  const attrs = e.attributes ?? {};
+  return attrs.detectFamily === "structural" || attrs.source === "roboflow-floorplan-seg";
+}
+
+export function countModelFamilyEntities(entities: OverlayEntity[]): DetectFamilyCounts {
+  const counts: DetectFamilyCounts = {
+    walls: 0,
+    rooms: 0,
+    openings: 0,
+    objects: 0,
+    north: 0,
+    structural: 0,
+  };
+  for (const e of entities) {
+    if (e.source !== "model") continue;
+    if (isStructuralEntity(e)) counts.structural += 1;
+    if (e.type === "wall") counts.walls += 1;
+    else if (e.type === "room" || e.type === "unit_boundary") counts.rooms += 1;
+    else if (e.type === "north_arrow") counts.north += 1;
+    else if (e.type === "door" || e.type === "window") counts.openings += 1;
+    else if (e.type === "stair" || e.type === "fixture" || e.type === "other") counts.objects += 1;
+  }
+  if (
+    counts.walls === 0 &&
+    counts.rooms === 0 &&
+    counts.openings === 0 &&
+    counts.objects === 0 &&
+    counts.north === 0 &&
+    counts.structural === 0
+  ) {
+    return EMPTY_FAMILY_COUNTS;
+  }
+  return counts;
+}
 
 const AUTO_DETECT_STORAGE_KEY = "highlife-auto-detect";
 
@@ -38,9 +102,7 @@ interface UsePageRegionDetectOptions {
   widthPx: number;
   heightPx: number;
   enabled: boolean;
-  graphicsKind?: "vector" | "raster" | "hybrid" | "image" | "unknown";
-  sourceFileName?: string;
-  sourceStoragePath?: string;
+  drawingOcrMeta?: PageOcrMeta | null;
   /** All pages in the drawing — used for batch layout detection. */
   allPages?: {
     pageNumber: number;
@@ -68,9 +130,7 @@ export function usePageRegionDetect({
   widthPx,
   heightPx,
   enabled,
-  graphicsKind,
-  sourceFileName,
-  sourceStoragePath,
+  drawingOcrMeta = null,
   allPages = [],
 }: UsePageRegionDetectOptions) {
   const setModelPredictions = useOverlayStore((s) => s.setModelPredictions);
@@ -79,11 +139,19 @@ export function usePageRegionDetect({
     if (!slice) return 0;
     return slice.entities.filter((e) => e.source === "model" && !isLayoutEntity(e)).length;
   });
+  const familyCounts = useOverlayStore(
+    useShallow((s) => {
+      const slice = s.pages[pageKey(s.analysisId, s.pageNumber)];
+      if (!slice) return EMPTY_FAMILY_COUNTS;
+      return countModelFamilyEntities(slice.entities);
+    }),
+  );
   const [detecting, setDetecting] = useState(false);
   const [detectError, setDetectError] = useState<string | null>(null);
   const [detectWarning, setDetectWarning] = useState<string | null>(null);
   const [modelLabel, setModelLabel] = useState<string | null>(null);
   const [detectModelId, setDetectModelId] = useState(() => readStoredDetectModel() ?? "");
+  const [detectCategory, setDetectCategory] = useState<string | null>(null);
   const [autoDetect, setAutoDetectState] = useState(() => readStoredAutoDetect());
   const [progress, setProgress] = useState<DetectProgress | null>(null);
   const attempted = useRef<Record<string, boolean>>({});
@@ -100,17 +168,31 @@ export function usePageRegionDetect({
   }, []);
 
   const runDetectWithModel = useCallback(
-    async (modelId: string): Promise<boolean> => {
-      if (!imageUrl || widthPx < 1 || heightPx < 1) return false;
+    async (modelId: string, category?: string | null): Promise<boolean> => {
+      if (widthPx < 1 || heightPx < 1) return false;
+      if (!imageUrl) return false;
       if (!modelId) {
         setDetectError("Pick a detection model first.");
         return false;
       }
       const isLayoutModel = modelId === LAYOUT_DETECT_MODEL;
-      const drawingCrop =
-        !isLayoutModel
-          ? findDrawingAreaCrop(analysisId, pageNumber, widthPx, heightPx)
-          : null;
+      const task = detectTaskFromModelId(modelId, category ?? detectCategory);
+      const replaceTypes = replaceTypesForDetectTask(task);
+      const overlayCtx = { analysisId, pageNumber, replaceTypes };
+      const drawingAreaCrop = findDrawingAreaCrop(analysisId, pageNumber, widthPx, heightPx);
+      let drawingCrop = !isLayoutModel ? drawingAreaCrop : null;
+      let cropWarning: string | null = null;
+      if (!isLayoutModel && task === "north") {
+        const resolved = resolveNorthDetectCrop(useDetectModelSettingsStore.getState().northCrop, {
+          title: findTitleBlockCrop(analysisId, pageNumber, widthPx, heightPx),
+          drawing: drawingAreaCrop,
+        });
+        drawingCrop = resolved.crop;
+        cropWarning = resolved.warning;
+      } else if (!isLayoutModel && !drawingAreaCrop) {
+        cropWarning =
+          "No drawing area region — run layout detect on the Layout tab or draw a drawing area box first. Detection will run on the full page.";
+      }
       abortRef.current?.abort();
       const ac = new AbortController();
       abortRef.current = ac;
@@ -119,38 +201,14 @@ export function usePageRegionDetect({
       setDetectWarning(null);
       setProgress({ index: 0, total: 0, tiled: false, tile: null, label: "Preparing…" });
       partialRef.current = [];
-      setModelPredictions([], { analysisId, pageNumber });
+      setModelPredictions([], overlayCtx);
       try {
-        if (modelId === "wall:vector_pdf") {
-          setProgress({ index: 0, total: 1, tiled: false, tile: null, label: "Reading vector PDF…" });
-          const { detectVectorPdfWalls } = await import("@/lib/pdf/extractVectorWalls");
-          const result = await detectVectorPdfWalls({
-            storagePath: sourceStoragePath ?? "",
-            sourceFileName: sourceFileName ?? "",
-            pageNumber,
-            targetWidthPx: widthPx,
-            targetHeightPx: heightPx,
-            graphicsKind,
-            signal: ac.signal,
-          });
-          if (ac.signal.aborted) throw new DetectStreamCancelled();
-          const entities = result.regions.map((region) => detectedRegionToOverlay(region));
-          setModelPredictions(entities, { analysisId, pageNumber });
-          const all =
-            useOverlayStore.getState().pages[pageKey(analysisId, pageNumber)]?.entities ?? entities;
-          void projectStore.setOverlays(analysisId, pageNumber, all);
-          setDetectWarning(result.warning);
-          setModelLabel("vector_pdf local");
-          setProgress(null);
-          return true;
-        }
         const blob = await rasterBlobForDetect(imageUrl);
         if (ac.signal.aborted) throw new DetectStreamCancelled();
-        if (!isLayoutModel && !drawingCrop) {
-          setDetectWarning(
-            "No drawing area region — run layout detect on the Layout tab or draw a drawing area box first. Detection will run on the full page without tiling.",
-          );
+        if (!isLayoutModel && cropWarning) {
+          setDetectWarning(cropWarning);
         }
+        const patch = useDetectModelSettingsStore.getState().getSettings(familyFromDetectTask(task));
         const result = await detectPageRegionsStream(
           {
             image: blob,
@@ -158,6 +216,10 @@ export function usePageRegionDetect({
             originalHeight: heightPx,
             detectModel: modelId,
             drawingCrop,
+            tileWalls: patch?.tileEnabled,
+            wallImgsz: patch?.imgsz,
+            wallThreshold: patch?.threshold,
+            tileOverlap: patch?.overlap,
             signal: ac.signal,
           },
           {
@@ -193,12 +255,19 @@ export function usePageRegionDetect({
             },
             onTileDone: (ev) => {
               if (ev.regions?.length) {
-                const next = [
-                  ...partialRef.current,
-                  ...ev.regions.map((region) => detectedRegionToOverlay(region)),
-                ];
-                partialRef.current = next;
-                setModelPredictions(next, { analysisId, pageNumber });
+                const seen = new Set(partialRef.current.map((entity) => entity.id));
+                const incoming = ev.regions
+                  .map((region) => detectedRegionToOverlay(region))
+                  .filter((entity) => {
+                    if (seen.has(entity.id)) return false;
+                    seen.add(entity.id);
+                    return true;
+                  });
+                if (incoming.length) {
+                  const next = [...partialRef.current, ...incoming];
+                  partialRef.current = next;
+                  setModelPredictions(next, overlayCtx);
+                }
               }
               const last = ev.index >= ev.total;
               setProgress({
@@ -216,7 +285,7 @@ export function usePageRegionDetect({
           },
         );
         const entities = result.regions.map((region) => detectedRegionToOverlay(region));
-        setModelPredictions(entities, { analysisId, pageNumber });
+        setModelPredictions(entities, overlayCtx);
         const all =
           useOverlayStore.getState().pages[pageKey(analysisId, pageNumber)]?.entities ?? entities;
         void projectStore.setOverlays(analysisId, pageNumber, all);
@@ -253,14 +322,40 @@ export function usePageRegionDetect({
       imageUrl,
       widthPx,
       heightPx,
-      graphicsKind,
-      sourceFileName,
-      sourceStoragePath,
       setModelPredictions,
+      detectCategory,
     ],
   );
 
   const runDetect = useCallback(async () => runDetectWithModel(detectModelId), [detectModelId, runDetectWithModel]);
+
+  const runDetectModel = useCallback(
+    async (modelId: string, category?: string | null) => runDetectWithModel(modelId, category),
+    [runDetectWithModel],
+  );
+
+  const runDetectAll = useCallback(async () => {
+    const keys = [
+      ["highlife-detect-model-walls", "wall_segmentation"],
+      ["highlife-detect-model-structural", "structural_detection"],
+      ["highlife-detect-model-rooms", "room_types"],
+      ["highlife-detect-model-openings", "opening_detection"],
+      ["highlife-detect-model-objects", "object_detection"],
+      ["highlife-detect-model-north", "north_arrow"],
+    ] as const;
+    for (const [key, category] of keys) {
+      const id =
+        localStorage.getItem(key) ||
+        DEFAULT_DETECT_MODEL_BY_PERSIST_KEY[key] ||
+        (key.endsWith("walls") ? detectModelId : "");
+      if (!id) continue;
+      if (id.startsWith("symbol:north") || category === "north_arrow") {
+        // Catalog stub may not be runnable; skip quietly if last run failed.
+      }
+      const ok = await runDetectWithModel(id, category);
+      if (!ok && abortRef.current?.signal.aborted) return;
+    }
+  }, [detectModelId, runDetectWithModel]);
 
   const runLayoutDetect = useCallback(
     async () => runDetectWithModel(LAYOUT_DETECT_MODEL),
@@ -288,6 +383,8 @@ export function usePageRegionDetect({
       batchIndex: 0,
       batchTotal: targets.length,
     });
+
+    const layoutReplace = replaceTypesForDetectTask("layout");
 
     let successCount = 0;
     let lastWarning: string | null = null;
@@ -317,7 +414,11 @@ export function usePageRegionDetect({
         if (ac.signal.aborted) throw new DetectStreamCancelled();
 
         partialRef.current = [];
-        setModelPredictions([], { analysisId, pageNumber: target.pageNumber });
+        setModelPredictions([], {
+          analysisId,
+          pageNumber: target.pageNumber,
+          replaceTypes: layoutReplace,
+        });
 
         setProgress({
           index: batchIndex,
@@ -391,12 +492,23 @@ export function usePageRegionDetect({
             },
             onTileDone: (ev) => {
               if (ev.regions?.length) {
-                const next = [
-                  ...partialRef.current,
-                  ...ev.regions.map((region) => detectedRegionToOverlay(region)),
-                ];
-                partialRef.current = next;
-                setModelPredictions(next, { analysisId, pageNumber: target.pageNumber });
+                const seen = new Set(partialRef.current.map((entity) => entity.id));
+                const incoming = ev.regions
+                  .map((region) => detectedRegionToOverlay(region))
+                  .filter((entity) => {
+                    if (seen.has(entity.id)) return false;
+                    seen.add(entity.id);
+                    return true;
+                  });
+                if (incoming.length) {
+                  const next = [...partialRef.current, ...incoming];
+                  partialRef.current = next;
+                  setModelPredictions(next, {
+                    analysisId,
+                    pageNumber: target.pageNumber,
+                    replaceTypes: layoutReplace,
+                  });
+                }
               }
               const last = ev.index >= ev.total;
               setProgress({
@@ -418,7 +530,11 @@ export function usePageRegionDetect({
         );
 
         const entities = result.regions.map((region) => detectedRegionToOverlay(region));
-        setModelPredictions(entities, { analysisId, pageNumber: target.pageNumber });
+        setModelPredictions(entities, {
+          analysisId,
+          pageNumber: target.pageNumber,
+          replaceTypes: layoutReplace,
+        });
         const all =
           useOverlayStore.getState().pages[pageKey(analysisId, target.pageNumber)]?.entities ??
           entities;
@@ -465,9 +581,10 @@ export function usePageRegionDetect({
     }
   }, [allPages, analysisId, setModelPredictions]);
 
-  const selectDetectModel = useCallback((id: string) => {
+  const selectDetectModel = useCallback((id: string, model?: DetectModelOption) => {
     writeStoredDetectModel(id);
     setDetectModelId(id);
+    setDetectCategory(model?.category ?? null);
   }, []);
 
   useEffect(() => {
@@ -496,8 +613,12 @@ export function usePageRegionDetect({
     modelLabel,
     regionCount,
     detectModelId,
+    detectTask: detectTaskFromModelId(detectModelId, detectCategory),
     selectDetectModel,
     runDetect,
+    runDetectModel,
+    runDetectAll,
+    familyCounts,
     runLayoutDetect,
     runLayoutDetectAllPages,
     cancelDetect,

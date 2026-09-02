@@ -1,3 +1,5 @@
 #!/usr/bin/env bash
-# GPU VM setup script — implemented in Phase 6
-echo "setup_gpu.sh: stub — implement in Phase 6"
+# Legacy entry point — delegates to setup-race.sh (repo GPU env only).
+set -euo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+exec "$ROOT/setup-race.sh" --skip-apt --skip-vscode --skip-gh --skip-clone "$@"

@@ -9,6 +9,8 @@ from uuid import uuid4
 from app.config import get_settings
 from app.studio.dataset import (
     assert_base_model,
+    class_names_for_training,
+    effective_train_task,
     extract_dataset_zip,
     floordata_base_kind,
     is_floordata_base,
@@ -384,9 +386,9 @@ def _run_training_job_locked(auth: StudioAuth, job_id: str) -> None:
     if not storage_path:
         raise StudioApiError("Dataset has no uploaded ZIP yet.")
 
-    task = job["task"]
+    task = effective_train_task(dataset, job.get("base_model") or "")
     base_model = assert_base_model(task, job.get("base_model") or "")
-    class_names = list(dataset.get("class_names") or [])
+    class_names = class_names_for_training(dataset)
     if not class_names:
         raise StudioApiError("Dataset has no class names.")
 
@@ -515,14 +517,16 @@ def _run_local_training_job_locked(job_id: str) -> None:
     job = store.get_job(job_id)
     dataset = store.get_dataset(job["dataset_id"])
     pages_src = store.labeled_pages_dir(job["dataset_id"])
-    task = job["task"]
+    task = effective_train_task(dataset, job.get("base_model") or "")
     base_model = assert_base_model(task, job.get("base_model") or "")
-    class_names = list(dataset.get("class_names") or [])
+    class_names = class_names_for_training(dataset)
     if not class_names:
         raise store.StudioStoreError("Dataset has no class names.")
 
     artifacts = store.job_artifacts_dir(job_id)
     preview_path = artifacts / "preview.png"
+    from app.studio.train_monitor import record_epoch_preview, write_gt_overlay
+
     store.patch_job(
         job_id,
         {
@@ -539,6 +543,9 @@ def _run_local_training_job_locked(job_id: str) -> None:
 
     settings = get_settings()
     data_yaml = prepare_yolo_dataset(pages_src, class_names, task=task)
+    sample_for_gt = _pick_sample_image(data_yaml)
+    if sample_for_gt:
+        write_gt_overlay(sample_for_gt, artifacts / "previews" / "gt.png")
     store.patch_job(job_id, {"progress": 15, "log_tail": "Dataset prepared — starting epochs…"})
 
     run_name = f"job-{job_id[:8]}"
@@ -580,6 +587,7 @@ def _run_local_training_job_locked(job_id: str) -> None:
         }
         if preview_ok:
             patch["preview_updated_at"] = _now()
+            record_epoch_preview(preview_path, current)
         store.patch_job(job_id, patch)
 
     _run_selected_trainer(
@@ -637,6 +645,8 @@ def _run_local_training_job_locked(job_id: str) -> None:
                 out_path=preview_path,
                 imgsz=imgsz,
             )
+    if final_preview_ok:
+        record_epoch_preview(preview_path, int(job.get("epochs") or 0) or 1)
     metrics = _metrics_from_run(project / run_name)
     from app.studio.model_catalog import category_for_base
 

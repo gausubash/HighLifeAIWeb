@@ -137,7 +137,11 @@ def extract_sheet_context(
     if not settings.vlm_enabled:
         return heuristic_sheet_meta(rgb)
 
-    if provider in {"http", "openai", "vlm"} and (settings.vlm_api_url or settings.vlm_api_key):
+    if (
+        settings.vlm_allow_remote_images
+        and provider in {"http", "openai", "vlm"}
+        and (settings.vlm_api_url or settings.vlm_api_key)
+    ):
         try:
             return _call_vlm_http(rgb, settings)
         except Exception as exc:

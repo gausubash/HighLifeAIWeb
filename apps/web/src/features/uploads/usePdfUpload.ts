@@ -6,6 +6,7 @@ import { createPageOnlyResult } from "@/lib/mock/createPageResult";
 import { projectStore } from "@/lib/data/projectStore";
 import { rasterImageGraphicsInfo } from "@/lib/pdf/classifyPdfGraphics";
 import { putPageImageBlob } from "@/lib/pdf/pageImageStore";
+import { putSourcePdf } from "@/lib/pdf/sourcePdfStore";
 import { PDF_RENDER_DPI, clampPdfUploadDpi, pdfRenderScale, PDF_UPLOAD_DPI_MAX, PDF_UPLOAD_DPI_MIN } from "@/lib/pdf/renderPdfFirstPage";
 import { computeScaleInfo, type ScaleInfo } from "@/lib/scale/parseScale";
 import { planImageRef, uploadPlanObject } from "@/lib/supabase/plans";
@@ -158,6 +159,7 @@ export function usePdfUpload({ projectId, onComplete }: UsePdfUploadOptions) {
           setProgress(80);
           const analysis = await projectStore.createAnalysis(projectId, file.name);
           const folder = `${analysis.ownerId}/${projectId}/${analysis.id}`;
+          await putSourcePdf(analysis.id, file);
           await uploadPlanObject(
             `${folder}/source${sourceExtension(file)}`,
             file,

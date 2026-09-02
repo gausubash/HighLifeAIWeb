@@ -15,7 +15,8 @@ def test_is_retinanet_base() -> None:
 
 def test_assert_base_model_retinanet() -> None:
     assert assert_base_model("detect", "retinanet_latest.pth") == "retinanet_latest.pth"
-    assert assert_base_model("segment", "retinanet") == "retinanet_latest.pth"
+    with pytest.raises(ValueError, match="detect base"):
+        assert_base_model("segment", "retinanet")
 
 
 def test_load_yolo_boxes_from_polygon_line(tmp_path: Path) -> None:

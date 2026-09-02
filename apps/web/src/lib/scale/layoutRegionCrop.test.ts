@@ -2,14 +2,248 @@ import { describe, expect, it } from "vitest";
 import { geometryBBox, type OverlayEntity } from "@/features/plan-editor/types";
 import { pageKey, useOverlayStore } from "@/features/plan-editor/useOverlayStore";
 import {
+  ensureOcrLinesInPageSpace,
   findTitleBlockRegion,
   mapCropTileToPage,
+  mapOcrPointsToPage,
+  ocrFrameFromPixelCrop,
   ocrScaleTextForPage,
+  pixelCropToNormalized,
+  remapOcrLinesFromPixelCrop,
   remapOcrLinesToLayoutRegion,
   scaleNeedsCalibration,
+  scaleOcrBboxes,
   shouldApplyOcrScale,
 } from "./layoutRegionCrop";
 import type { ScaleInfo } from "./parseScale";
+
+describe("mapOcrPointsToPage", () => {
+  it("places crop-local OCR boxes onto the drawing region in page pixels", () => {
+    const pts = mapOcrPointsToPage(
+      [
+        [10, 20],
+        [110, 20],
+        [110, 40],
+        [10, 40],
+      ],
+      { x: 0.2, y: 0.15, width: 0.7, height: 0.75 },
+      2000,
+      1000,
+      1400,
+      750,
+    );
+    expect(pts[0]).toEqual([410, 170]);
+    expect(pts[2]).toEqual([510, 190]);
+  });
+
+  it("scales when the OCR raster DPI differs from the page", () => {
+    const pts = mapOcrPointsToPage(
+      [
+        [0, 0],
+        [2800, 0],
+        [2800, 1500],
+        [0, 1500],
+      ],
+      { x: 0.2, y: 0.15, width: 0.7, height: 0.75 },
+      2000,
+      1000,
+      2800,
+      1500,
+    );
+    expect(pts[0]?.[0]).toBeCloseTo(400);
+    expect(pts[0]?.[1]).toBeCloseTo(150);
+    expect(pts[2]?.[0]).toBeCloseTo(1800);
+    expect(pts[2]?.[1]).toBeCloseTo(900);
+  });
+});
+
+describe("ocrFrameFromPixelCrop", () => {
+  const pixel = {
+    x0: 800,
+    y0: 300,
+    width: 2800,
+    height: 1500,
+    sourceWidth: 4000,
+    sourceHeight: 2000,
+  };
+
+  it("stores the PNG crop as 0–1 of the source raster", () => {
+    expect(pixelCropToNormalized(pixel)).toEqual({
+      x: 0.2,
+      y: 0.15,
+      width: 0.7,
+      height: 0.75,
+    });
+  });
+
+  it("places crop-local OCR on the overlay page when the PNG is a different DPI", () => {
+    const frame = ocrFrameFromPixelCrop(pixel, 2000, 1000);
+    const pts = mapOcrPointsToPage(
+      [
+        [10, 20],
+        [110, 20],
+        [110, 40],
+        [10, 40],
+      ],
+      frame.layoutCrop,
+      2000,
+      1000,
+      frame.ocrWidthPx,
+      frame.ocrHeightPx,
+    );
+    expect(pts[0]?.[0]).toBeCloseTo(405);
+    expect(pts[0]?.[1]).toBeCloseTo(160);
+    expect(pts[2]?.[0]).toBeCloseTo(455);
+    expect(pts[2]?.[1]).toBeCloseTo(170);
+  });
+
+  it("scales with paper DPI after OCR (crop-local boxes stay put on the ink)", () => {
+    const sheet = {
+      coordSpace: "crop" as const,
+      ocrFrame: ocrFrameFromPixelCrop(pixel, 2000, 1000),
+      lines: [
+        {
+          text: "UNIT 12",
+          confidence: 0.9,
+          bbox: [
+            [10, 20],
+            [110, 20],
+            [110, 40],
+            [10, 40],
+          ],
+        },
+      ],
+    };
+    const lifted = ensureOcrLinesInPageSpace(sheet, null, 4000, 2000);
+    expect(lifted?.lines?.[0]?.bbox?.[0]?.[0]).toBeCloseTo(810);
+    expect(lifted?.lines?.[0]?.bbox?.[0]?.[1]).toBeCloseTo(320);
+  });
+});
+
+describe("scaleOcrBboxes", () => {
+  it("maps API raster boxes onto the crop PNG pixel grid", () => {
+    const scaled = scaleOcrBboxes(
+      { lines: [{ text: "A", confidence: 1, bbox: [[10, 20], [50, 20], [50, 36], [10, 36]] }] },
+      2800,
+      1500,
+      1400,
+      750,
+    );
+    expect(scaled.lines?.[0]?.bbox?.[0]?.[0]).toBeCloseTo(5);
+    expect(scaled.lines?.[0]?.bbox?.[0]?.[1]).toBeCloseTo(10);
+  });
+});
+
+describe("ensureOcrLinesInPageSpace", () => {
+  const crop = { x: 0.2, y: 0.15, width: 0.7, height: 0.75 };
+  const pageW = 2000;
+  const pageH = 1000;
+
+  it("maps crop-local boxes through the stored OCR frame", () => {
+    const sheet = {
+      coordSpace: "crop" as const,
+      ocrFrame: {
+        layoutCrop: crop,
+        ocrWidthPx: 1400,
+        ocrHeightPx: 750,
+        pageWidthPx: 2000,
+        pageHeightPx: 1000,
+      },
+      lines: [
+        {
+          text: "BED 1",
+          confidence: 0.9,
+          bbox: [
+            [10, 20],
+            [110, 20],
+            [110, 40],
+            [10, 40],
+          ],
+        },
+      ],
+    };
+    const lifted = ensureOcrLinesInPageSpace(sheet, crop, pageW, pageH);
+    expect(lifted?.lines?.[0]?.bbox?.[0]).toEqual([410, 170]);
+    expect(lifted?.coordSpace).toBe("page");
+  });
+
+  it("lifts crop-local boxes into page pixels", () => {
+    const sheet = {
+      lines: [
+        {
+          text: "BED 1",
+          confidence: 0.9,
+          bbox: [
+            [10, 20],
+            [110, 20],
+            [110, 40],
+            [10, 40],
+          ],
+        },
+      ],
+    };
+    const lifted = ensureOcrLinesInPageSpace(sheet, crop, pageW, pageH);
+    expect(lifted?.lines?.[0]?.bbox?.[0]).toEqual([410, 170]);
+    expect(lifted?.lines?.[0]?.bbox?.[2]).toEqual([510, 190]);
+  });
+
+  it("does not double-offset boxes that are already in page space", () => {
+    const sheet = {
+      lines: [
+        {
+          text: "BED 1",
+          confidence: 0.9,
+          bbox: [
+            [410, 170],
+            [510, 170],
+            [510, 190],
+            [410, 190],
+          ],
+        },
+      ],
+    };
+    const kept = ensureOcrLinesInPageSpace(sheet, crop, pageW, pageH);
+    expect(kept?.lines?.[0]?.bbox?.[0]).toEqual([410, 170]);
+  });
+
+  it("lifts crop-local boxes even when labels sit only on the right of the crop", () => {
+    const sheet = {
+      lines: [
+        {
+          text: "UNIT 12",
+          confidence: 0.9,
+          bbox: [
+            [900, 20],
+            [1100, 20],
+            [1100, 48],
+            [900, 48],
+          ],
+        },
+      ],
+    };
+    const lifted = ensureOcrLinesInPageSpace(sheet, crop, pageW, pageH);
+    expect(lifted?.lines?.[0]?.bbox?.[0]?.[0]).toBeCloseTo(1300);
+    expect(lifted?.lines?.[0]?.bbox?.[0]?.[1]).toBeCloseTo(170);
+  });
+});
+
+describe("remapOcrLinesFromPixelCrop", () => {
+  it("maps crop-raster boxes through bitmap pixels onto viewer page pixels", () => {
+    const sheet = {
+      lines: [{ text: "U1", confidence: 1, bbox: [[10, 20], [50, 20], [50, 36], [10, 36]] }],
+    };
+    const remapped = remapOcrLinesFromPixelCrop(
+      sheet,
+      { x0: 400, y0: 300, width: 1000, height: 800, sourceWidth: 4000, sourceHeight: 2000 },
+      2000,
+      1000,
+      1000,
+      800,
+    );
+    expect(remapped.lines?.[0]?.bbox?.[0]?.[0]).toBeCloseTo(205);
+    expect(remapped.lines?.[0]?.bbox?.[0]?.[1]).toBeCloseTo(160);
+  });
+});
 
 describe("remapOcrLinesToLayoutRegion", () => {
   it("maps crop-local OCR boxes onto the layout region in viewer pixels", () => {

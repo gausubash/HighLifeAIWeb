@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { WorkspaceShell } from "@/components/shell/WorkspaceShell";
+import { HoverHint } from "@/components/ui/HoverHint";
 import {
   createDatasetTiles,
   getDataset,
@@ -11,7 +12,7 @@ import {
 import type { MlDataset, StudioPage } from "@/lib/studio/types";
 
 interface StudioTilesTabProps {
-  sidebar?: ReactNode;
+  activityRail?: ReactNode;
   initialDatasetId?: string;
   onAnnotate?: (datasetId: string) => void;
   onOpenTrain?: (datasetId: string) => void;
@@ -50,10 +51,10 @@ function TilePreview({
         <img src={src} alt="" className="h-full w-full object-contain" loading="lazy" />
       </div>
       <div className="space-y-0.5 px-1.5 py-1">
-        <p className="truncate text-[10px] font-medium text-slate-800" title={page.source_name}>
+        <p className="truncate text-xs font-medium text-slate-800" title={page.source_name}>
           {page.source_name}
         </p>
-        <p className="text-[9px] text-slate-500">
+        <p className="text-xs text-slate-500">
           {page.width_px}×{page.height_px}
           {(page.split || "train") === "test" ? " · test" : " · train"}
           {page.labeled ? ` · ${page.shape_count} labels` : " · unlabeled"}
@@ -64,7 +65,7 @@ function TilePreview({
 }
 
 export function StudioTilesTab({
-  sidebar,
+  activityRail,
   initialDatasetId,
   onAnnotate,
   onOpenTrain,
@@ -78,6 +79,7 @@ export function StudioTilesTab({
   const [tileSize, setTileSize] = useState(640);
   const [overlap, setOverlap] = useState(0.2);
   const [onlyLabeled, setOnlyLabeled] = useState(true);
+  const [skipUnlabeled, setSkipUnlabeled] = useState(true);
   const [replaceExisting, setReplaceExisting] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [filter, setFilter] = useState<"all" | "labeled" | "unlabeled">("all");
@@ -158,6 +160,7 @@ export function StudioTilesTab({
         tileSize,
         overlap,
         onlyLabeled,
+        skipUnlabeled,
         replaceExisting,
       });
       setDataset(next);
@@ -166,9 +169,19 @@ export function StudioTilesTab({
       const labeled = next.tiles_labeled ?? 0;
       const skipped = next.tiles_skipped_small ?? 0;
       const skippedDrawing = next.tiles_skipped_no_drawing ?? 0;
+      const fullPage = next.tiles_full_page_fallback ?? 0;
+      const skippedUnlabeled = next.tiles_skipped_unlabeled ?? 0;
       const parts: string[] = [];
       if (created > 0) {
         parts.push(`Created ${created} tile(s) (${labeled} with labels).`);
+      }
+      if (fullPage > 0) {
+        parts.push(
+          `${fullPage} page(s) tiled from the full sheet (no Drawing area box — draw Main drawing in Annotate or layout YOLO will crop automatically when weights are available).`,
+        );
+      }
+      if (skippedUnlabeled > 0) {
+        parts.push(`${skippedUnlabeled} unlabeled tile(s) skipped.`);
       }
       if (skipped > 0) {
         parts.push(`${skipped} page(s) drawing area too small to tile.`);
@@ -199,15 +212,9 @@ export function StudioTilesTab({
 
   return (
     <WorkspaceShell
-      showSidebar
       hideTopBar
       allowNewProjectShortcut={false}
-      sidebar={sidebar}
-      statusText={
-        dataset
-          ? `${tiles.length} tile(s) · ${dataset.name}`
-          : "Training tiles"
-      }
+      activityRail={activityRail}
     >
       <div className="flex h-full min-h-0 flex-col bg-white">
         <div className="shrink-0 border-b border-slate-200 px-4 py-3">
@@ -276,6 +283,15 @@ export function StudioTilesTab({
             <label className="flex items-center gap-1.5 pb-2 text-xs text-slate-600">
               <input
                 type="checkbox"
+                checked={skipUnlabeled}
+                disabled={busy}
+                onChange={(e) => setSkipUnlabeled(e.target.checked)}
+              />
+              Skip unlabeled tiles
+            </label>
+            <label className="flex items-center gap-1.5 pb-2 text-xs text-slate-600">
+              <input
+                type="checkbox"
                 checked={replaceExisting}
                 disabled={busy}
                 onChange={(e) => setReplaceExisting(e.target.checked)}
@@ -311,11 +327,14 @@ export function StudioTilesTab({
               </>
             ) : null}
           </div>
-          <p className="mt-2 max-w-3xl text-[11px] leading-relaxed text-slate-500">
-            Tiles are generated only inside the sheet <span className="font-medium text-slate-600">Drawing area</span>
-            — from a layout rectangle in Annotate, or layout YOLO when no box is drawn. Room and wall labels on
-            full pages are clipped into each tile when they overlap.
-          </p>
+          <div className="mt-2 flex items-center gap-1">
+            <span className="text-xs font-medium text-slate-600">Tiles</span>
+            <HoverHint
+              align="start"
+              label="About tiles"
+              text="Tiles crop to the Main drawing / Drawing area rectangle when you draw one in Annotate. Otherwise layout YOLO (when weights are installed) finds the floor plan, or the full sheet is tiled. Enable Skip unlabeled tiles to drop windows with no clipped labels — useful for training."
+            />
+          </div>
           {message ? <p className="mt-2 text-xs text-slate-700">{message}</p> : null}
           {error ? <p className="mt-2 text-xs text-red-600">{error}</p> : null}
         </div>
@@ -336,15 +355,15 @@ export function StudioTilesTab({
                   type="button"
                   className={
                     filter === id
-                      ? "rounded bg-brand-700 px-2 py-0.5 text-[10px] font-medium text-white"
-                      : "rounded bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-700 hover:bg-slate-200"
+                      ? "rounded bg-brand-700 px-2 py-0.5 text-xs font-medium text-white"
+                      : "rounded bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700 hover:bg-slate-200"
                   }
                   onClick={() => setFilter(id)}
                 >
                   {label}
                 </button>
               ))}
-              <span className="text-[10px] text-slate-500">{tiles.length} shown</span>
+              <span className="text-xs text-slate-500">{tiles.length} shown</span>
             </div>
 
             {tiles.length === 0 ? (
@@ -372,7 +391,7 @@ export function StudioTilesTab({
           {selected && datasetId ? (
             <aside className="hidden w-80 shrink-0 overflow-y-auto border-l border-slate-200 bg-slate-50 p-3 md:block">
               <p className="text-xs font-semibold text-slate-800">Selected tile</p>
-              <p className="mt-0.5 break-all text-[10px] text-slate-500">{selected.source_name}</p>
+              <p className="mt-0.5 break-all text-xs text-slate-500">{selected.source_name}</p>
               <div className="mt-2 overflow-hidden rounded border border-slate-200 bg-white">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
@@ -381,7 +400,7 @@ export function StudioTilesTab({
                   className="w-full object-contain"
                 />
               </div>
-              <dl className="mt-3 space-y-1 text-[11px] text-slate-600">
+              <dl className="mt-3 space-y-1 text-[13px] text-slate-600">
                 <div className="flex justify-between gap-2">
                   <dt>Size</dt>
                   <dd className="font-medium text-slate-800">

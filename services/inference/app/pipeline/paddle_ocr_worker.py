@@ -19,46 +19,110 @@ def _emit(obj: dict[str, Any]) -> None:
     sys.stdout.flush()
 
 
+def _result_to_dict(obj: Any) -> dict[str, Any]:
+    if obj is None:
+        return {}
+    if isinstance(obj, dict):
+        return obj
+    json_fn = getattr(obj, "json", None)
+    if callable(json_fn):
+        try:
+            data = json_fn()
+            if isinstance(data, dict):
+                return data
+        except Exception:
+            pass
+    try:
+        return dict(obj)
+    except Exception:
+        return {}
+
+
+def _poly_to_quad(poly: Any) -> list[list[float]] | None:
+    if poly is None:
+        return None
+    try:
+        arr = np.asarray(poly, dtype=float)
+    except Exception:
+        return None
+    if arr.size >= 8:
+        return [[float(x), float(y)] for x, y in arr.reshape(-1, 2)[:4]]
+    if arr.size >= 4:
+        x0, y0, x1, y1 = [float(v) for v in arr.reshape(-1)[:4]]
+        return [[x0, y0], [x1, y0], [x1, y1], [x0, y1]]
+    return None
+
+
+def classic_predict_kwargs(
+    *,
+    det_limit_side_len: int,
+    det_db_thresh: float | None,
+    use_doc_orientation_classify: bool,
+    use_doc_unwarping: bool,
+    use_textline_orientation: bool,
+    text_rec_score_thresh: float,
+) -> list[dict[str, Any]]:
+    """PaddleOCR 3.x reads these on predict(), not only the constructor."""
+    full: dict[str, Any] = {
+        "use_doc_orientation_classify": bool(use_doc_orientation_classify),
+        "use_doc_unwarping": bool(use_doc_unwarping),
+        "use_textline_orientation": bool(use_textline_orientation),
+        "text_det_limit_side_len": int(det_limit_side_len),
+        "text_det_limit_type": "max",
+        "text_rec_score_thresh": float(text_rec_score_thresh),
+        "use_queues": False,
+    }
+    if det_db_thresh is not None:
+        full["text_det_thresh"] = float(det_db_thresh)
+    return [
+        full,
+        {
+            "use_doc_orientation_classify": bool(use_doc_orientation_classify),
+            "use_doc_unwarping": bool(use_doc_unwarping),
+            "use_textline_orientation": bool(use_textline_orientation),
+        },
+        {},
+    ]
+
+
 def _normalize_result(raw: Any, min_score: float = 0.0) -> list[dict[str, Any]]:
     """Support PaddleOCR 2.x list layout and 3.x dict/result objects with score filtering."""
     lines: list[dict[str, Any]] = []
     if raw is None:
         return lines
 
-    # PP-OCR 3.x/4.x predict() may return list of dicts with rec_texts / rec_scores / rec_polys
-    if isinstance(raw, list) and raw and isinstance(raw[0], dict) and "rec_texts" in raw[0]:
-        for page in raw:
+    pages = raw if isinstance(raw, list) else [raw]
+    dict_pages = [_result_to_dict(page) for page in pages]
+    if dict_pages and any("rec_texts" in page or "dt_polys" in page for page in dict_pages):
+        for page in dict_pages:
             texts = page.get("rec_texts") or []
             scores = page.get("rec_scores") or []
-            polys = page.get("rec_polys") or page.get("dt_polys") or []
+            polys = page.get("rec_polys") or page.get("dt_polys") or page.get("rec_boxes") or []
             for i, text in enumerate(texts):
                 conf = float(scores[i]) if i < len(scores) else 0.0
                 if conf < min_score:
                     continue
-                bbox = None
-                if i < len(polys):
-                    poly = polys[i]
-                    try:
-                        bbox = [[float(p[0]), float(p[1])] for p in poly]
-                    except Exception:
-                        bbox = None
+                bbox = _poly_to_quad(polys[i]) if i < len(polys) else None
                 if str(text).strip():
                     lines.append({"text": str(text).strip(), "confidence": conf, "bbox": bbox})
         return lines
 
     # Classic PaddleOCR.ocr(): [[ [box, (text, conf)], ... ]]
-    pages = raw if isinstance(raw, list) else [raw]
     for page in pages:
         if not page:
             continue
-        for item in page:
+        try:
+            items = list(page)
+        except TypeError:
+            continue
+        for item in items:
             try:
                 box, rec = item[0], item[1]
                 text = str(rec[0]).strip()
                 conf = float(rec[1])
                 if conf < min_score:
                     continue
-                bbox = [[float(p[0]), float(p[1])] for p in box]
+                bbox = _poly_to_quad(box)
             except Exception:
                 continue
             if text:
@@ -93,7 +157,7 @@ def _get_ocr(
     use_gpu: bool = False,
     det_limit_side_len: int = 960,
     det_db_thresh: float | None = None,
-    use_doc_orientation_classify: bool = True,
+    use_doc_orientation_classify: bool = False,
     use_doc_unwarping: bool = False,
     use_textline_orientation: bool = True,
     text_rec_score_thresh: float = 0.5,
@@ -114,18 +178,25 @@ def _get_ocr(
 
     from paddleocr import PaddleOCR
 
-    det_kwargs: dict[str, Any] = {
-        "det_limit_side_len": int(det_limit_side_len),
-        "det_limit_type": "max",
+    angle_cls = bool(use_textline_orientation or use_doc_orientation_classify)
+    v3: dict[str, Any] = {
+        "lang": lang or "en",
+        "use_doc_orientation_classify": use_doc_orientation_classify,
+        "use_doc_unwarping": use_doc_unwarping,
+        "use_textline_orientation": use_textline_orientation,
+        "text_det_limit_side_len": int(det_limit_side_len),
+        "text_det_limit_type": "max",
+        "text_rec_score_thresh": float(text_rec_score_thresh),
+        "use_queues": False,
     }
     if det_db_thresh is not None:
-        det_kwargs["det_db_thresh"] = float(det_db_thresh)
-
-    angle_cls = bool(use_textline_orientation or use_doc_orientation_classify)
+        v3["text_det_thresh"] = float(det_db_thresh)
 
     # Try fullest parameter combinations first
     attempts = [
-        # Modern PP-OCR / PP-Structure kwargs
+        v3,
+        {**v3, "use_gpu": use_gpu},
+        # Modern PP-OCR 2.x names
         {
             "lang": lang or "en",
             "use_gpu": use_gpu,
@@ -134,7 +205,8 @@ def _get_ocr(
             "use_textline_orientation": use_textline_orientation,
             "text_rec_score_thresh": float(text_rec_score_thresh),
             "show_log": False,
-            **det_kwargs,
+            "det_limit_side_len": int(det_limit_side_len),
+            "det_limit_type": "max",
         },
         # Standard PaddleOCR 2.x/3.x with use_angle_cls and drop_score
         {
@@ -143,7 +215,8 @@ def _get_ocr(
             "use_angle_cls": angle_cls,
             "drop_score": float(text_rec_score_thresh),
             "show_log": False,
-            **det_kwargs,
+            "det_limit_side_len": int(det_limit_side_len),
+            "det_limit_type": "max",
         },
         # Minimal angle_cls
         {
@@ -151,13 +224,13 @@ def _get_ocr(
             "use_gpu": use_gpu,
             "use_angle_cls": angle_cls,
             "show_log": False,
-            **det_kwargs,
+            "det_limit_side_len": int(det_limit_side_len),
         },
         # Bare kwargs
         {
             "lang": lang or "en",
             "use_angle_cls": angle_cls,
-            **det_kwargs,
+            "det_limit_side_len": int(det_limit_side_len),
         },
         {"lang": lang or "en"},
     ]
@@ -185,7 +258,7 @@ def ocr_image_array(
     use_gpu: bool = False,
     det_limit_side_len: int = 960,
     det_db_thresh: float | None = None,
-    use_doc_orientation_classify: bool = True,
+    use_doc_orientation_classify: bool = False,
     use_doc_unwarping: bool = False,
     use_textline_orientation: bool = True,
     text_rec_score_thresh: float = 0.5,
@@ -221,15 +294,26 @@ def ocr_image_array(
         use_textline_orientation=use_textline_orientation,
         text_rec_score_thresh=text_rec_score_thresh,
     )
-    # Prefer path-less numpy BGR for classic API
-    bgr = rgb[:, :, ::-1].copy()
     raw = None
     if hasattr(ocr, "predict"):
-        try:
-            raw = ocr.predict(bgr)
-        except Exception:
-            raw = None
+        for kw in classic_predict_kwargs(
+            det_limit_side_len=det_limit_side_len,
+            det_db_thresh=det_db_thresh,
+            use_doc_orientation_classify=use_doc_orientation_classify,
+            use_doc_unwarping=use_doc_unwarping,
+            use_textline_orientation=use_textline_orientation,
+            text_rec_score_thresh=text_rec_score_thresh,
+        ):
+            try:
+                raw = ocr.predict(rgb, **kw)
+                break
+            except TypeError:
+                continue
+            except Exception:
+                raw = None
+                break
     if raw is None and hasattr(ocr, "ocr"):
+        bgr = rgb[:, :, ::-1].copy()
         try:
             raw = ocr.ocr(bgr, cls=bool(use_textline_orientation or use_doc_orientation_classify))
         except TypeError:
@@ -246,7 +330,7 @@ def _handle_job(job: dict[str, Any]) -> None:
     det_limit_side_len = int(job.get("det_limit_side_len") or 960)
     det_db_thresh = job.get("det_db_thresh")
     det_db_thresh_f = float(det_db_thresh) if det_db_thresh is not None else None
-    use_doc_orientation_classify = bool(job.get("use_doc_orientation_classify", True))
+    use_doc_orientation_classify = bool(job.get("use_doc_orientation_classify", False))
     use_doc_unwarping = bool(job.get("use_doc_unwarping", False))
     use_textline_orientation = bool(job.get("use_textline_orientation", True))
     text_rec_score_thresh = float(job.get("text_rec_score_thresh", 0.5))
@@ -287,7 +371,10 @@ def _handle_job(job: dict[str, Any]) -> None:
 def main() -> int:
     """Stay alive across jobs so PaddleOCR-VL is not reloaded every title-block click."""
     while True:
-        raw = sys.stdin.readline()
+        try:
+            raw = sys.stdin.readline()
+        except KeyboardInterrupt:
+            return 130
         if not raw:
             return 0
         raw = raw.strip()
@@ -298,6 +385,19 @@ def main() -> int:
             if str(job.get("cmd") or "") == "shutdown":
                 return 0
             _handle_job(job)
+        except KeyboardInterrupt:
+            _emit(
+                {
+                    "type": "error",
+                    "message": (
+                        "OCR interrupted before results were ready. "
+                        "If the inference server reloaded or you pressed Ctrl+C, run OCR again. "
+                        "Avoid uvicorn --reload while OCR is running."
+                    ),
+                    "cancelled": True,
+                }
+            )
+            return 130
         except Exception as exc:
             _emit({"type": "error", "message": str(exc), "trace": traceback.format_exc()})
     return 0

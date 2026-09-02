@@ -29,6 +29,68 @@ def parse_class_names(raw: str | list[str]) -> list[str]:
     return names
 
 
+def _norm_class_key(name: str) -> str:
+    return " ".join(name.strip().lower().replace("_", " ").split())
+
+
+def is_north_arrow_class(name: str) -> bool:
+    key = _norm_class_key(name)
+    return key in {"north", "compass", "north arrow"} or key.startswith("north arrow")
+
+
+def foreign_stock_class_names(category: str | None) -> set[str]:
+    """Stock legend names that belong to a different Studio purpose."""
+    from app.studio.model_catalog import DATASET_CATEGORY_DEFAULTS, normalize_category
+
+    current = normalize_category(category)
+    other: set[str] = set()
+    for cat, spec in DATASET_CATEGORY_DEFAULTS.items():
+        if cat == current:
+            continue
+        for raw in spec.get("class_names") or []:
+            other.add(str(raw))
+            other.add(_norm_class_key(str(raw)))
+    return other
+
+
+def class_names_for_training(dataset: dict) -> list[str]:
+    """Legend used for YOLO convert / train — drop leftover classes from another purpose."""
+    from app.studio.model_catalog import (
+        CATEGORY_NORTH_ARROW,
+        DATASET_CATEGORY_DEFAULTS,
+        normalize_category,
+    )
+
+    category = normalize_category(str(dataset.get("category") or "") or None)
+    raw = [str(name) for name in (dataset.get("class_names") or []) if str(name).strip()]
+    defaults = [str(name) for name in (DATASET_CATEGORY_DEFAULTS.get(category or "", {}).get("class_names") or [])]
+    foreign = foreign_stock_class_names(category)
+
+    if category == CATEGORY_NORTH_ARROW:
+        kept: list[str] = []
+        seen: set[str] = set()
+        for name in [*raw, *defaults, "North Arrow"]:
+            if not is_north_arrow_class(name):
+                continue
+            if "North Arrow" in seen:
+                continue
+            seen.add("North Arrow")
+            kept.append("North Arrow")
+        return kept
+
+    kept = []
+    seen: set[str] = set()
+    for name in raw:
+        key = _norm_class_key(name)
+        if name in foreign or key in foreign:
+            continue
+        if name in seen:
+            continue
+        seen.add(name)
+        kept.append(name)
+    return kept or list(defaults)
+
+
 def _is_image(path: Path) -> bool:
     return path.suffix.lower() in IMAGE_SUFFIXES
 
@@ -337,6 +399,8 @@ def floordata_base_kind(base_model: str) -> str | None:
 def default_base_model(task: str) -> str:
     if task == "segment":
         return "yolov8n-seg.pt"
+    if task == "pose":
+        return "yolo26n-pose.pt"
     return "yolov8n.pt"
 
 
@@ -351,6 +415,15 @@ YOLO_DETECT_BASES = [
     "yolo11m.pt",
     "yolo11l.pt",
     "yolo11x.pt",
+]
+YOLO_POSE_BASES = [
+    "yolo26n-pose.pt",
+    "yolo26s-pose.pt",
+    "yolo26m-pose.pt",
+    "yolo11n-pose.pt",
+    "yolo11s-pose.pt",
+    "yolov8n-pose.pt",
+    "yolov8s-pose.pt",
 ]
 YOLO_SEG_BASES = [
     "yolov8n-seg.pt",
@@ -368,28 +441,25 @@ YOLO_SEG_BASES = [
 
 def list_base_models(task: str | None = None) -> list[dict]:
     """Catalog of fine-tune bases for Model Studio (task-filtered when provided)."""
-    from app.studio.floordata_train import tensorflow_available
     from app.studio.mitunet_train import mitunet_train_available
     from app.studio.model_catalog import (
-        CATEGORY_GENERAL_DETECT,
-        CATEGORY_GENERAL_SEGMENT,
-        CATEGORY_WALL_DETECT,
+        CATEGORY_NORTH_ARROW,
+        CATEGORY_OBJECT_DETECT,
+        CATEGORY_ROOM_TYPES,
         CATEGORY_WALL_SEGMENT,
         LAYOUT_BASE_ID,
+        MITUNET_BASE_ID,
         ROOM_BASE_ID,
         WALL_YOLO_BASE_ID,
         pretrained_base_meta,
     )
-    from app.studio.tf_runtime import tensorflow_runtime_hint
     from app.yolo.mitunet import mitunet_ready
 
-    tf_ok = tensorflow_available()
-    tf_hint = None if tf_ok else tensorflow_runtime_hint()
     mit_ok = mitunet_train_available() and mitunet_ready()
 
     items: list[dict] = []
 
-    for extra_id in (LAYOUT_BASE_ID, WALL_YOLO_BASE_ID, ROOM_BASE_ID):
+    for extra_id in (LAYOUT_BASE_ID, ROOM_BASE_ID, WALL_YOLO_BASE_ID):
         meta = pretrained_base_meta(extra_id)
         if meta:
             items.append(meta)
@@ -401,8 +471,23 @@ def list_base_models(task: str | None = None) -> list[dict]:
                 "name": f"YOLO detect · {mid.replace('.pt', '')}",
                 "task": "detect",
                 "family": "yolo",
-                "category": CATEGORY_GENERAL_DETECT,
-                "description": "Ultralytics COCO-pretrained detector (auto-downloads on first train).",
+                "category": CATEGORY_OBJECT_DETECT,
+                "categories": [CATEGORY_OBJECT_DETECT],
+                "description": "Ultralytics COCO-pretrained detector.",
+                "runnable": True,
+                "ready": True,
+            }
+        )
+    for mid in YOLO_POSE_BASES:
+        items.append(
+            {
+                "id": mid,
+                "name": f"YOLO pose · {mid.replace('.pt', '')}",
+                "task": "pose",
+                "family": "yolo",
+                "category": CATEGORY_NORTH_ARROW,
+                "categories": [CATEGORY_NORTH_ARROW],
+                "description": "Ultralytics pose checkpoint — fine-tune tip/base for north heading.",
                 "runnable": True,
                 "ready": True,
             }
@@ -414,79 +499,42 @@ def list_base_models(task: str | None = None) -> list[dict]:
                 "name": f"YOLO segment · {mid.replace('.pt', '')}",
                 "task": "segment",
                 "family": "yolo",
-                "category": CATEGORY_GENERAL_SEGMENT,
-                "description": "Ultralytics COCO-pretrained instance segmentation.",
+                "category": CATEGORY_ROOM_TYPES,
+                "description": "Ultralytics instance segmentation (room type masks).",
                 "runnable": True,
                 "ready": True,
             }
         )
-    items.extend(
-        [
-            {
-                "id": RETINANET_BASE_ID,
-                "name": "RetinaNet (Cubicasa / MMDet walls)",
-                "task": "detect",
-                "family": "mmdet",
-                "category": CATEGORY_WALL_DETECT,
-                "description": "Fine-tune from models/retinanet_latest.pth.",
-                "runnable": True,
-                "ready": True,
-            },
-            {
-                "id": FASTER_RCNN_BASE_ID,
-                "name": "Faster R-CNN (MMDet walls)",
-                "task": "detect",
-                "family": "mmdet",
-                "category": CATEGORY_WALL_DETECT,
-                "description": "Fine-tune from models/faster_rcnn_latest.pth.",
-                "runnable": True,
-                "ready": True,
-            },
-            {
-                "id": CASCADE_RCNN_BASE_ID,
-                "name": "Cascade R-CNN (MMDet walls)",
-                "task": "detect",
-                "family": "mmdet",
-                "category": CATEGORY_WALL_DETECT,
-                "description": "Fine-tune from models/cascade_swin_latest.pth (mapped to Faster R-CNN head).",
-                "runnable": True,
-                "ready": True,
-            },
-            {
-                "id": DEEPLAB_BASE_ID,
-                "name": "DeepLabV3+ (floorData)",
-                "task": "segment",
-                "family": "floordata",
-                "category": CATEGORY_WALL_SEGMENT,
-                "description": tf_hint or "TensorFlow DeepLab wall masks (.h5).",
-                "runnable": tf_ok,
-                "ready": tf_ok,
-            },
-            {
-                "id": UNET_BASE_ID,
-                "name": "UNet (floorData)",
-                "task": "segment",
-                "family": "floordata",
-                "category": CATEGORY_WALL_SEGMENT,
-                "description": tf_hint or "TensorFlow UNet wall masks (.h5).",
-                "runnable": tf_ok,
-                "ready": tf_ok,
-            },
-            {
-                "id": MITUNET_BASE_ID,
-                "name": "MitUNet (Mix-Transformer B4 walls)",
-                "task": "segment",
-                "family": "mitunet",
-                "category": CATEGORY_WALL_SEGMENT,
-                "description": "PyTorch semantic wall masks — merges Wall / External Wall labels.",
-                "runnable": mit_ok,
-                "ready": mit_ok,
-            },
-        ]
+    items.append(
+        {
+            "id": MITUNET_BASE_ID,
+            "name": "MitUNet (Mix-Transformer B4 walls)",
+            "task": "segment",
+            "family": "mitunet",
+            "category": CATEGORY_WALL_SEGMENT,
+            "description": "The wall segmentation trainer — merges Wall / External Wall labels.",
+            "runnable": mit_ok,
+            "ready": mit_ok,
+        }
     )
-    if task in {"detect", "segment"}:
+    if task in {"detect", "segment", "pose"}:
         return [item for item in items if item["task"] == task]
     return items
+
+
+def is_pose_base(base_model: str) -> bool:
+    leaf = (base_model or "").strip().lower().replace("\\", "/").rsplit("/", 1)[-1]
+    return leaf.endswith("-pose.pt") or leaf in {name.lower() for name in YOLO_POSE_BASES}
+
+
+def effective_train_task(dataset: dict, base_model: str = "") -> str:
+    from app.studio.model_catalog import CATEGORY_NORTH_ARROW, normalize_category
+
+    if is_pose_base(base_model):
+        return "pose"
+    if normalize_category(str(dataset.get("category") or "") or None) == CATEGORY_NORTH_ARROW:
+        return "pose"
+    return str(dataset.get("task") or "detect")
 
 
 def assert_base_model(task: str, base_model: str) -> str:
@@ -553,9 +601,15 @@ def assert_base_model(task: str, base_model: str) -> str:
             )
         return MITUNET_BASE_ID
     lowered = name.lower()
+    if is_pose_base(name) or "pose" in lowered:
+        if task != "pose":
+            raise ValueError("Pose checkpoints (e.g. yolo26n-pose.pt) are for north-arrow tip/base training.")
+        return name if name.endswith(".pt") else name
+    if task == "pose":
+        raise ValueError("North-arrow pose training needs a *-pose.pt base (e.g. yolo26n-pose.pt).")
     if task == "segment" and "seg" not in lowered:
         raise ValueError("Segmentation training needs a *-seg.pt base model (e.g. yolov8n-seg.pt).")
-    if task == "detect" and "seg" in lowered:
+    if task == "detect" and ("seg" in lowered or "pose" in lowered):
         raise ValueError("Object detection training needs a detect checkpoint (e.g. yolov8n.pt), not *-seg.pt.")
     return name
 

@@ -23,6 +23,10 @@ export interface HierarchyRoom {
   unitId: string | null;
   isCommon: boolean;
   areaM2?: number | null;
+  /** Printed size from drawing OCR when present (e.g. 3.9m × 3.9m). */
+  labeledWidthM?: number | null;
+  labeledDepthM?: number | null;
+  labeledSizeText?: string | null;
   confidence: number;
   objectIds: string[];
 }

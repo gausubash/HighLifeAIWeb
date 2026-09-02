@@ -130,8 +130,9 @@ export type DetectResponse = {
 export type DetectModelOption = {
   id: string;
   name: string;
-  kind: "builtin" | "studio" | "stack";
+  kind: "builtin" | "studio" | "stack" | "layout";
   task: string;
+  category?: string;
   description: string;
   ready: boolean;
   runnable: boolean;
@@ -250,6 +251,10 @@ export async function detectPageRegionsStream(
     detectModel?: string | null;
     /** Normalized drawing-area crop from layout detect / manual box. */
     drawingCrop?: NormalizedCrop | null;
+    tileWalls?: boolean;
+    wallImgsz?: number;
+    wallThreshold?: number;
+    tileOverlap?: number;
     signal?: AbortSignal;
   },
   handlers: DetectStreamHandlers = {},
@@ -263,6 +268,10 @@ export async function detectPageRegionsStream(
   if (opts.drawingCrop) {
     form.append("drawingCrop", JSON.stringify(opts.drawingCrop));
   }
+  if (opts.tileWalls != null) form.append("tileWalls", opts.tileWalls ? "1" : "0");
+  if (opts.wallImgsz != null) form.append("wallImgsz", String(opts.wallImgsz));
+  if (opts.wallThreshold != null) form.append("wallThreshold", String(opts.wallThreshold));
+  if (opts.tileOverlap != null) form.append("tileOverlap", String(opts.tileOverlap));
 
   const res = await fetch(`${getInferenceApiBaseUrl()}/v1/detect/stream`, {
     method: "POST",
@@ -343,5 +352,47 @@ export async function detectPageRegionsStream(
     throw new Error("Detection stream ended without a result.");
   }
   return finalResult;
+}
+
+export type GeometryUnitPolygon = {
+  id: string;
+  label: string;
+  points: { x: number; y: number }[];
+};
+
+export type GeometryOpening = {
+  type: string;
+  label: string;
+  points: { x: number; y: number }[];
+};
+
+/** Compose-only wall-bounded extract. Does not write Detect overlays. */
+export async function extractGeometryFromImage(opts: {
+  image: Blob;
+  fileName?: string;
+  originalWidth: number;
+  originalHeight: number;
+  unitPolygons?: GeometryUnitPolygon[];
+  openings?: GeometryOpening[];
+  pixelsPerMeter?: number | null;
+}): Promise<DetectResponse> {
+  const form = new FormData();
+  form.append("file", opts.image, opts.fileName ?? "page.png");
+  form.append("originalWidth", String(opts.originalWidth));
+  form.append("originalHeight", String(opts.originalHeight));
+  if (opts.unitPolygons?.length) {
+    form.append("unitPolygons", JSON.stringify(opts.unitPolygons));
+  }
+  if (opts.openings?.length) {
+    form.append("openings", JSON.stringify(opts.openings));
+  }
+  if (opts.pixelsPerMeter != null && opts.pixelsPerMeter > 0) {
+    form.append("pixelsPerMeter", String(opts.pixelsPerMeter));
+  }
+  const res = await fetch(`${getInferenceApiBaseUrl()}/v1/geometry/extract`, {
+    method: "POST",
+    body: form,
+  });
+  return parseJson<DetectResponse>(res);
 }
 

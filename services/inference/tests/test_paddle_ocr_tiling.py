@@ -39,6 +39,22 @@ def test_ocr_lines_near_duplicate_ignores_different_text() -> None:
     assert not ocr_lines_near_duplicate(_line("BED 1", 0, 0), _line("BED 2", 2, 2))
 
 
+def test_merge_drops_wide_label_shifted_across_tiles() -> None:
+    """Overlap copies of a long word can sit 30px apart — taller-than-wide thresh missed them."""
+    a = _box_line("KITCHEN", 100, 50, 160, 16, conf=0.9)
+    b = _box_line("KITCHEN.", 128, 52, 160, 16, conf=0.7)
+    merged = merge_ocr_lines([a, b])
+    assert len(merged) == 1
+    assert merged[0]["text"] == "KITCHEN"
+
+
+def test_merge_keeps_two_identical_labels_far_apart() -> None:
+    a = _box_line("WC", 40, 80, 28, 14)
+    b = _box_line("WC", 420, 80, 28, 14)
+    merged = merge_ocr_lines([a, b])
+    assert len(merged) == 2
+
+
 def _box_line(text: str, x: float, y: float, w: float, h: float = 14, conf: float = 0.9, cuts: list[str] | None = None) -> dict:
     row = {
         "text": text,
@@ -182,3 +198,21 @@ def test_run_tiled_ocr_lines_emits_tile_progress() -> None:
     assert starts[0]["total"] == starts[-1]["total"]
     assert starts[0]["tile"]["width"] > 0
     assert starts[0]["tile"]["height"] > 0
+
+
+def test_ocr_tile_wanted_defaults_and_settings() -> None:
+    from app.config import Settings
+    from app.pipeline.paddle_ocr import ocr_tile_wanted
+
+    on = Settings(_env_file=None, PADDLE_OCR_TILE_ENABLED=True)
+    off = Settings(_env_file=None, PADDLE_OCR_TILE_ENABLED=False)
+
+    assert ocr_tile_wanted(on, "default", backend="classic") is False
+    assert ocr_tile_wanted(on, "dense", backend="classic") is False
+    assert ocr_tile_wanted(off, "dense", backend="classic") is False
+
+    assert ocr_tile_wanted(on, "default", {"tile_title_block": True}, backend="classic") is True
+    assert ocr_tile_wanted(on, "dense", {"tile_drawing": False}, backend="classic") is False
+    assert ocr_tile_wanted(off, "dense", {"tile_drawing": True}, backend="classic") is True
+    assert ocr_tile_wanted(on, "dense", {"tile": False}, backend="classic") is False
+    assert ocr_tile_wanted(on, "dense", {"tile_drawing": True, "backend": "vl"}, backend="vl") is False

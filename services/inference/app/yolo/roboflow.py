@@ -1,7 +1,8 @@
-"""Roboflow floorplan-iculh wall/door segmentation.
+"""Roboflow hosted / cached floor-plan models.
 
-Prefer on-device ONNX weights (cached under models/roboflow_cache/). Fall back to
-detect.roboflow.com when local weights are missing and ROBOFLOW_API_KEY is set.
+Wall detect uses Universe walldetection-iekzl/archvision_wall_detect.
+Room detect uses floorplan-9fxye. Prefer on-device ONNX under models/roboflow_cache/;
+fall back to detect.roboflow.com when ROBOFLOW_API_KEY is set.
 
 Prefetch once (Python 3.10–3.12 + inference package):
 
@@ -19,10 +20,22 @@ import numpy as np
 from PIL import Image
 
 from app.config import Settings, get_settings
-from app.yolo.classes import display_label, entity_type_for, room_type_for
+from app.yolo.classes import display_label, entity_type_for, opening_type_for, room_type_for
+from app.yolo.compass_keypoints import attach_keypoints, parse_prediction_keypoints
 
 DEFAULT_MODEL_ID = "floorplan-iculh/1"
+DEFAULT_WALL_MODEL_ID = "archvision_wall_detect/1"
+DEFAULT_ROOM_MODEL_ID = "floorplan-9fxye/1"
+DEFAULT_FLOORPLAN_SEG_MODEL_ID = "floorplan-segmentation-imdze/4"
 DETECT_BASE = "https://detect.roboflow.com"
+
+
+def normalize_roboflow_model_id(model_id: str | None, default: str = DEFAULT_MODEL_ID) -> str:
+    """Accept project/version or workspace/project/version."""
+    parts = [p for p in (model_id or "").strip().strip("/").split("/") if p]
+    if len(parts) >= 2:
+        return f"{parts[-2]}/{parts[-1]}"
+    return default
 
 _local_model = None
 _local_model_path: str | None = None
@@ -32,24 +45,58 @@ def default_roboflow_cache_dir() -> Path:
     return Path(__file__).resolve().parents[2] / "models" / "roboflow_cache"
 
 
-def resolve_roboflow_weights(settings: Settings | None = None) -> Path | None:
+def resolve_roboflow_weights(
+    settings: Settings | None = None,
+    *,
+    model_id: str | None = None,
+    weights_override: str | None = None,
+) -> Path | None:
     """Return local ONNX/PT path when available."""
     settings = settings or get_settings()
-    override = (getattr(settings, "roboflow_weights", None) or "").strip()
+    override = (weights_override if weights_override is not None else getattr(settings, "roboflow_weights", None) or "").strip()
     if override:
         path = Path(override)
         return path if path.is_file() else None
-    model_id = (settings.roboflow_model_id or DEFAULT_MODEL_ID).strip().strip("/")
-    parts = [p for p in model_id.split("/") if p]
-    if len(parts) >= 2:
-        project, version = parts[-2], parts[-1]
-    else:
-        project, version = "floorplan-iculh", "1"
+    resolved = normalize_roboflow_model_id(
+        model_id or settings.roboflow_model_id,
+        DEFAULT_MODEL_ID,
+    )
+    project, version = resolved.split("/", 1)
     cached = default_roboflow_cache_dir() / project / version / "weights.onnx"
     if cached.is_file():
         return cached
-    alt = Path(__file__).resolve().parents[2] / "models" / "roboflow_floorplan_iculh.onnx"
-    return alt if alt.is_file() else None
+    if project == "floorplan-iculh":
+        alt = Path(__file__).resolve().parents[2] / "models" / "roboflow_floorplan_iculh.onnx"
+        return alt if alt.is_file() else None
+    return None
+
+
+def resolve_roboflow_wall_weights(settings: Settings | None = None) -> Path | None:
+    settings = settings or get_settings()
+    return resolve_roboflow_weights(
+        settings,
+        model_id=getattr(settings, "roboflow_wall_model_id", None) or DEFAULT_WALL_MODEL_ID,
+        weights_override=getattr(settings, "roboflow_wall_weights", None) or "",
+    )
+
+
+def resolve_roboflow_room_weights(settings: Settings | None = None) -> Path | None:
+    settings = settings or get_settings()
+    return resolve_roboflow_weights(
+        settings,
+        model_id=getattr(settings, "roboflow_room_model_id", None) or DEFAULT_ROOM_MODEL_ID,
+        weights_override=getattr(settings, "roboflow_room_weights", None) or "",
+    )
+
+
+def resolve_roboflow_floorplan_seg_weights(settings: Settings | None = None) -> Path | None:
+    settings = settings or get_settings()
+    return resolve_roboflow_weights(
+        settings,
+        model_id=getattr(settings, "roboflow_floorplan_seg_model_id", None)
+        or DEFAULT_FLOORPLAN_SEG_MODEL_ID,
+        weights_override=getattr(settings, "roboflow_floorplan_seg_weights", None) or "",
+    )
 
 
 def roboflow_local_ready(settings: Settings | None = None) -> bool:
@@ -64,6 +111,27 @@ def roboflow_cloud_ready(settings: Settings | None = None) -> bool:
 def roboflow_ready(settings: Settings | None = None) -> bool:
     settings = settings or get_settings()
     return roboflow_local_ready(settings) or roboflow_cloud_ready(settings)
+
+
+def roboflow_wall_ready(settings: Settings | None = None) -> bool:
+    settings = settings or get_settings()
+    if resolve_roboflow_wall_weights(settings) is not None:
+        return True
+    return bool(settings.roboflow_api_key.strip())
+
+
+def roboflow_room_ready(settings: Settings | None = None) -> bool:
+    settings = settings or get_settings()
+    if resolve_roboflow_room_weights(settings) is not None:
+        return True
+    return bool(settings.roboflow_api_key.strip())
+
+
+def roboflow_floorplan_seg_ready(settings: Settings | None = None) -> bool:
+    settings = settings or get_settings()
+    if resolve_roboflow_floorplan_seg_weights(settings) is not None:
+        return True
+    return bool(settings.roboflow_api_key.strip())
 
 
 def _bbox(poly: list[tuple[float, float]]) -> tuple[float, float, float, float]:
@@ -110,6 +178,14 @@ def predictions_to_regions(predictions: list[dict]):
             x2, y2 = cx + width / 2.0, cy + height / 2.0
             poly = [(x1, y1), (x2, y1), (x2, y2), (x1, y2)]
         label = display_label(label_raw)
+        attributes = {
+            "roomType": room_type_for(label_raw),
+            "label": label,
+            "source": "roboflow",
+            "classId": int(item.get("class_id") or 0),
+            **({"openingType": ot} if (ot := opening_type_for(label_raw)) else {}),
+        }
+        attach_keypoints(attributes, parse_prediction_keypoints(item))
         regions.append(
             DetectedRegion(
                 id=str(uuid4()),
@@ -118,12 +194,7 @@ def predictions_to_regions(predictions: list[dict]):
                 confidence=round(conf, 4),
                 polygon=poly,
                 bbox=_bbox(poly),
-                attributes={
-                    "roomType": room_type_for(label_raw),
-                    "label": label,
-                    "source": "roboflow",
-                    "classId": int(item.get("class_id") or 0),
-                },
+                attributes=attributes,
             )
         )
     return regions
@@ -132,8 +203,32 @@ def predictions_to_regions(predictions: list[dict]):
 def is_wall_region(region) -> bool:
     if region.type == "wall":
         return True
-    key = (region.label or "").strip().lower().replace("_", " ")
-    return key in {"wall", "walls", "partition", "external wall", "interior wall"}
+    key = (region.label or "").strip().lower().replace("_", " ").replace("-", " ")
+    return key in {
+        "wall",
+        "walls",
+        "partition",
+        "external wall",
+        "interior wall",
+        "internal wall",
+    }
+
+
+def is_opening_region(region) -> bool:
+    if region.type in {"door", "window"}:
+        return True
+    key = (region.label or "").strip().lower().replace("_", " ").replace("-", " ")
+    return key in {
+        "door",
+        "doors",
+        "window",
+        "windows",
+        "single door",
+        "sliding door",
+        "main door",
+        "bay window",
+        "blind window",
+    }
 
 
 def _get_local_model(weights: Path):
@@ -180,14 +275,18 @@ def detect_roboflow_cloud(
     rgb: np.ndarray,
     *,
     settings: Settings | None = None,
+    model_id: str | None = None,
 ):
     settings = settings or get_settings()
     api_key = settings.roboflow_api_key.strip()
-    model_id = settings.roboflow_model_id.strip() or DEFAULT_MODEL_ID
+    resolved = normalize_roboflow_model_id(
+        model_id or settings.roboflow_model_id,
+        DEFAULT_MODEL_ID,
+    )
     if not api_key:
         raise RuntimeError("ROBOFLOW_API_KEY is empty.")
 
-    url = f"{DETECT_BASE}/{model_id.lstrip('/')}"
+    url = f"{DETECT_BASE}/{resolved}"
     conf_pct = max(1, min(100, int(round(settings.roboflow_conf * 100))))
     png = _png_bytes(rgb)
     with httpx.Client(timeout=90.0) as client:
@@ -215,3 +314,73 @@ def detect_roboflow_regions(
     if roboflow_local_ready(settings):
         return detect_roboflow_local(rgb, settings=settings)
     return detect_roboflow_cloud(rgb, settings=settings)
+
+
+def detect_roboflow_wall_regions(
+    rgb: np.ndarray,
+    *,
+    settings: Settings | None = None,
+):
+    """Universe walldetection-iekzl/archvision_wall_detect wall masks or boxes."""
+    settings = settings or get_settings()
+    model_id = getattr(settings, "roboflow_wall_model_id", None) or DEFAULT_WALL_MODEL_ID
+    weights = resolve_roboflow_wall_weights(settings)
+    if weights is not None:
+        regions = detect_roboflow_local(
+            rgb,
+            settings=settings.model_copy(
+                update={"roboflow_weights": str(weights), "roboflow_model_id": model_id}
+            ),
+        )
+    else:
+        regions = detect_roboflow_cloud(rgb, settings=settings, model_id=model_id)
+    return [region for region in regions if is_wall_region(region)]
+
+
+def detect_roboflow_room_regions(
+    rgb: np.ndarray,
+    *,
+    settings: Settings | None = None,
+):
+    """Office room instances from Universe floorplan-cvjp0/floorplan-9fxye."""
+    settings = settings or get_settings()
+    model_id = getattr(settings, "roboflow_room_model_id", None) or DEFAULT_ROOM_MODEL_ID
+    weights = resolve_roboflow_room_weights(settings)
+    if weights is not None:
+        return detect_roboflow_local(rgb, settings=settings.model_copy(update={"roboflow_weights": str(weights)}))
+    return detect_roboflow_cloud(rgb, settings=settings, model_id=model_id)
+
+
+def detect_roboflow_floorplan_seg_regions(
+    rgb: np.ndarray,
+    *,
+    settings: Settings | None = None,
+    detect_task: str | None = None,
+):
+    """Universe floorplan-lfnvy/floorplan-segmentation-imdze — wall, door, window instance seg."""
+    settings = settings or get_settings()
+    model_id = (
+        getattr(settings, "roboflow_floorplan_seg_model_id", None) or DEFAULT_FLOORPLAN_SEG_MODEL_ID
+    )
+    weights = resolve_roboflow_floorplan_seg_weights(settings)
+    if weights is not None:
+        regions = detect_roboflow_local(
+            rgb,
+            settings=settings.model_copy(
+                update={"roboflow_weights": str(weights), "roboflow_model_id": model_id}
+            ),
+        )
+    else:
+        regions = detect_roboflow_cloud(rgb, settings=settings, model_id=model_id)
+    for region in regions:
+        region.attributes["source"] = "roboflow-floorplan-seg"
+    task = (detect_task or getattr(settings, "detect_task", None) or "").strip().lower()
+    if task in {"walls", "wall_segmentation"}:
+        return [region for region in regions if is_wall_region(region)]
+    if task in {"openings", "opening_detection"}:
+        return [region for region in regions if is_opening_region(region)]
+    if task in {"structural", "structural_detection"}:
+        for region in regions:
+            region.attributes["detectFamily"] = "structural"
+        return regions
+    return regions

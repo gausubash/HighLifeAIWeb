@@ -28,7 +28,7 @@ export default function NewProjectPage() {
     resolver: zodResolver(projectSchema),
     defaultValues: {
       jurisdiction: "victoria",
-      policyVersion: "highlife_v1",
+      policyVersion: "hooper_apartment_rules_v1",
     },
   });
 
@@ -45,7 +45,7 @@ export default function NewProjectPage() {
   return (
     <WorkspaceShell>
       <div className="flex h-full min-h-0 flex-col">
-        <div className="shrink-0 border-b border-slate-200 bg-white px-4 py-3">
+        <div className="shrink-0 border-b border-[var(--hl-line)] px-4 py-3">
           <h1 className="text-lg font-semibold">Create project</h1>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto p-4">
@@ -57,7 +57,7 @@ export default function NewProjectPage() {
               <input
                 id="name"
                 {...register("name")}
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                className="hl-input"
               />
               {errors.name && (
                 <p className="mt-1 text-sm text-red-600">{errors.name.message}</p>
@@ -72,7 +72,7 @@ export default function NewProjectPage() {
                 id="description"
                 rows={3}
                 {...register("description")}
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                className="hl-input"
               />
             </div>
 
@@ -83,7 +83,7 @@ export default function NewProjectPage() {
               <input
                 id="jurisdiction"
                 {...register("jurisdiction")}
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                className="hl-input"
               />
               {errors.jurisdiction && (
                 <p className="mt-1 text-sm text-red-600">{errors.jurisdiction.message}</p>
@@ -97,10 +97,11 @@ export default function NewProjectPage() {
               <select
                 id="policyVersion"
                 {...register("policyVersion")}
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                className="hl-input"
               >
-                <option value="highlife_v1">highlife_v1 — Design Policy v1</option>
-                <option value="draft-v1">draft-v1 — Legacy draft</option>
+                <option value="hooper_apartment_rules_v1">
+                  hooper_apartment_rules_v1 — Apartment design rules (Hooper 2022)
+                </option>
               </select>
               {errors.policyVersion && (
                 <p className="mt-1 text-sm text-red-600">{errors.policyVersion.message}</p>

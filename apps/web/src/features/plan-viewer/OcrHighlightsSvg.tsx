@@ -1,11 +1,24 @@
 "use client";
 
+import {
+  formatOcrClassLabel,
+  ocrLabelAboveQuad,
+  ocrOverlayFontSize,
+} from "./ocrOverlayFont";
+import { useViewerStore } from "./useViewerStore";
+
+export type OcrHighlightSource = "title_block" | "drawing";
+
 export interface OcrHighlight {
   x: number;
   y: number;
   width: number;
   height: number;
   text: string;
+  confidence?: number;
+  source?: OcrHighlightSource;
+  /** Exact OCR polygon in page pixels (usually a 4-point quad). */
+  points?: { x: number; y: number }[];
 }
 
 interface OcrHighlightsSvgProps {
@@ -14,25 +27,54 @@ interface OcrHighlightsSvgProps {
   pageHeightPx: number;
 }
 
+const SOURCE_STYLE: Record<OcrHighlightSource, { stroke: string; fill: string; chip: string }> = {
+  title_block: {
+    stroke: "#4f46e5",
+    fill: "rgba(79, 70, 229, 0.12)",
+    chip: "#4f46e5",
+  },
+  drawing: {
+    stroke: "#0f766e",
+    fill: "rgba(13, 148, 136, 0.12)",
+    chip: "#0f766e",
+  },
+};
+
+function quadPoints(h: OcrHighlight, w: number, hh: number): { x: number; y: number }[] {
+  if (h.points && h.points.length >= 3) return h.points;
+  return [
+    { x: h.x, y: h.y },
+    { x: h.x + w, y: h.y },
+    { x: h.x + w, y: h.y + hh },
+    { x: h.x, y: h.y + hh },
+  ];
+}
+
+function estimateLabelWidth(text: string, fontSize: number): number {
+  return Math.max(fontSize * 2, text.length * fontSize * 0.62 + fontSize * 0.8);
+}
+
 /**
- * Vector SVG overlay for OCR boxes and labels — stays sharp when the page is CSS-zoomed.
- * Konva canvas text rasterizes and blurs under zoom; SVG text does not.
+ * Exact OCR quads. The class chip sits on the top edge and is not clipped to the box.
  */
 export function OcrHighlightsSvg({
   highlights,
   pageWidthPx,
   pageHeightPx,
 }: OcrHighlightsSvgProps) {
+  const ocrFontSize = useViewerStore((s) => s.ocrFontSize);
   if (!highlights.length || pageWidthPx < 1 || pageHeightPx < 1) return null;
 
-  const strokeW = Math.max(1.5, pageWidthPx / 2500);
-  const pad = Math.max(2, pageWidthPx / 4000);
+  const strokeW = Math.max(1.1, pageWidthPx / 2200);
 
   return (
     <svg
-      className="pointer-events-none absolute inset-0 h-full w-full"
+      className="pointer-events-none absolute inset-0 h-full w-full overflow-visible"
       viewBox={`0 0 ${pageWidthPx} ${pageHeightPx}`}
+      overflow="visible"
       preserveAspectRatio="none"
+      shapeRendering="geometricPrecision"
+      textRendering="geometricPrecision"
       aria-hidden
     >
       {highlights.map((h, idx) => {
@@ -41,42 +83,39 @@ export function OcrHighlightsSvg({
         const hh = Math.max(0, h.height);
         if (w < 1 || hh < 1) return null;
 
-        const fontSize = Math.max(14, Math.min(hh * 0.82, hh - pad * 2, 64));
-        const clipId = `ocr-clip-${idx}`;
+        const pts = quadPoints(h, w, hh);
+        const poly = pts.map((p) => `${p.x},${p.y}`).join(" ");
+        const fontSize = ocrOverlayFontSize(w, hh, safeText, pageWidthPx, ocrFontSize);
+        const chipH = fontSize + 5;
+        const place = ocrLabelAboveQuad(pts, 0);
+        const label = formatOcrClassLabel(safeText, h.confidence);
+        const chipW = estimateLabelWidth(label, fontSize);
+        const style = SOURCE_STYLE[h.source ?? "drawing"];
 
         return (
           <g key={idx}>
-            <defs>
-              <clipPath id={clipId}>
-                <rect x={h.x} y={h.y} width={w} height={hh} />
-              </clipPath>
-            </defs>
-            <rect
-              x={h.x}
-              y={h.y}
-              width={w}
-              height={hh}
-              rx={pad}
-              fill="rgba(99, 102, 241, 0.14)"
-              stroke="#4338ca"
+            <polygon
+              points={poly}
+              fill={style.fill}
+              stroke={style.stroke}
               strokeWidth={strokeW}
+              strokeLinejoin="miter"
             />
-            {safeText ? (
-              <text
-                x={h.x + pad}
-                y={h.y + hh / 2}
-                clipPath={`url(#${clipId})`}
-                dominantBaseline="middle"
-                fontSize={fontSize}
-                fontFamily="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace"
-                fontWeight="600"
-                fill="#1e1b4b"
-                stroke="rgba(255,255,255,0.92)"
-                strokeWidth={Math.max(2, fontSize * 0.18)}
-                paintOrder="stroke"
-              >
-                {safeText}
-              </text>
+            {label ? (
+              <g transform={`translate(${place.x} ${place.y}) rotate(${place.rotate})`}>
+                <rect x={0} y={-chipH} width={chipW} height={chipH} fill={style.chip} />
+                <text
+                  x={fontSize * 0.35}
+                  y={-4}
+                  fontSize={fontSize}
+                  fontFamily="ui-sans-serif, system-ui, sans-serif"
+                  fontWeight="600"
+                  fill="#ffffff"
+                  textAnchor="start"
+                >
+                  {label}
+                </text>
+              </g>
             ) : null}
           </g>
         );

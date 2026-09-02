@@ -71,7 +71,9 @@ const TITLE_CUES = [
 ];
 
 const UNIT_RE =
-  /\b(?:unit|apt|apartment|dwelling|tenancy|flat|suite)\s*[#.:-]?\s*([A-Z0-9]{1,8})\b/gi;
+  /\b(?:unit|apt|apartment|dwelling|tenancy|flat|suite)\s*(?:no\.?|nos\.?|number|#)?\s*[.:-]?\s*([A-Z0-9]{1,8})\b/gi;
+
+const UNIT_U_RE = /\bU\s*[-#.]?\s*(\d{1,4}[A-Za-z]?)\b/gi;
 
 const UNIT_ID_STOPWORDS = new Set([
   "PLAN",
@@ -89,7 +91,20 @@ const UNIT_ID_STOPWORDS = new Set([
   "INDEX",
   "LIST",
   "TABLE",
+  "EN",
+  "ENT",
+  "ENS",
+  "CT",
+  "WC",
 ]);
+
+/** Dwelling numbers (`101`, `12B`) or a single letter (`A`). Reject OCR crumbs like EN / CT. */
+export function isPlausibleUnitId(raw: string | null | undefined): boolean {
+  const uid = (raw ?? "").trim().toUpperCase();
+  if (!uid || UNIT_ID_STOPWORDS.has(uid)) return false;
+  if (/[0-9]/.test(uid)) return true;
+  return uid.length === 1 && /[A-Z]/.test(uid);
+}
 
 function titleCasePhrase(value: string): string {
   return value.replace(/\s+/g, " ").trim().toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
@@ -134,16 +149,27 @@ export function parseLevelName(text: string | null | undefined): string | null {
 /** Parse unit identifiers from OCR text ("Unit 101", "APT 12B"). */
 export function parseUnitIds(text: string | null | undefined, limit = 20): string[] {
   if (!text?.trim()) return [];
-  const found: string[] = [];
-  const seen = new Set<string>();
+  const hits: { uid: string; index: number }[] = [];
   const re = new RegExp(UNIT_RE.source, "gi");
   let match: RegExpExecArray | null;
   while ((match = re.exec(text)) !== null) {
     const uid = (match[1] ?? "").trim().toUpperCase();
-    if (!uid || UNIT_ID_STOPWORDS.has(uid) || seen.has(uid)) continue;
-    if (!/[0-9]/.test(uid) && uid.length > 3) continue;
-    seen.add(uid);
-    found.push(uid);
+    if (!isPlausibleUnitId(uid)) continue;
+    hits.push({ uid, index: match.index });
+  }
+  const ure = new RegExp(UNIT_U_RE.source, "gi");
+  while ((match = ure.exec(text)) !== null) {
+    const uid = (match[1] ?? "").trim().toUpperCase();
+    if (!isPlausibleUnitId(uid)) continue;
+    hits.push({ uid, index: match.index });
+  }
+  hits.sort((a, b) => a.index - b.index);
+  const found: string[] = [];
+  const seen = new Set<string>();
+  for (const hit of hits) {
+    if (seen.has(hit.uid)) continue;
+    seen.add(hit.uid);
+    found.push(hit.uid);
     if (found.length >= limit) break;
   }
   return found;
@@ -155,7 +181,7 @@ function mergeUnitIds(...groups: Array<string[] | null | undefined>): string[] {
   for (const group of groups) {
     for (const raw of group ?? []) {
       const uid = raw.trim().toUpperCase();
-      if (!uid || UNIT_ID_STOPWORDS.has(uid) || seen.has(uid)) continue;
+      if (!isPlausibleUnitId(uid) || seen.has(uid)) continue;
       seen.add(uid);
       found.push(uid);
     }
@@ -171,11 +197,70 @@ export function pickUnitIdsFromOcrMeta(meta: PageOcrMeta | null | undefined): st
   return mergeUnitIds(meta.unitIds, parseUnitIds(blob));
 }
 
+function concatUniqueUnitIds(...groups: Array<string[] | null | undefined>): string[] {
+  const found: string[] = [];
+  const seen = new Set<string>();
+  for (const group of groups) {
+    for (const raw of group ?? []) {
+      const uid = raw.trim().toUpperCase();
+      if (!uid || seen.has(uid)) continue;
+      seen.add(uid);
+      found.push(uid);
+    }
+  }
+  return found;
+}
+
 export function pickUnitIdsFromPage(page: PlanPage): string[] {
-  return mergeUnitIds(
+  return concatUniqueUnitIds(
+    page.manualUnitIds,
     pickUnitIdsFromOcrMeta(page.ocrMeta),
     pickUnitIdsFromOcrMeta(page.drawingOcrMeta),
   );
+}
+
+const MANUAL_UNIT_PREFIX = /^(?:UNIT|APT|APARTMENT|FLAT|DWELLING)\s*(?:NO\.?|NUMBER|#)?\s*/i;
+
+/** Normalize a user-typed unit id (`101`, `12B`, `Unit A`). */
+export function normalizeManualUnitId(raw: string | null | undefined): string | null {
+  const stripped = (raw ?? "").trim().replace(MANUAL_UNIT_PREFIX, "").replace(/\s+/g, "").toUpperCase();
+  if (!stripped || stripped.length > 12) return null;
+  if (isPlausibleUnitId(stripped)) return stripped;
+  if (/^[A-Z][A-Z0-9._-]{0,11}$/.test(stripped) && !UNIT_ID_STOPWORDS.has(stripped)) return stripped;
+  return null;
+}
+
+export function parseManualUnitIds(raw: string | null | undefined): string[] {
+  const found: string[] = [];
+  const seen = new Set<string>();
+  for (const part of (raw ?? "").split(/[,;]+/)) {
+    const uid = normalizeManualUnitId(part);
+    if (!uid || seen.has(uid)) continue;
+    seen.add(uid);
+    found.push(uid);
+  }
+  return found;
+}
+
+export function addManualUnitIds(page: PlanPage, raw: string): PlanPage {
+  const added = parseManualUnitIds(raw);
+  if (!added.length) return page;
+  return { ...page, manualUnitIds: concatUniqueUnitIds(page.manualUnitIds, added) };
+}
+
+export function removeManualUnitId(page: PlanPage, raw: string): PlanPage {
+  const uid = normalizeManualUnitId(raw) ?? raw.trim().replace(/^unit[\s#:-]*/i, "").toUpperCase();
+  if (!uid) return page;
+  const drop = (ids: string[] | undefined) =>
+    (ids ?? []).filter((id) => id.trim().toUpperCase() !== uid);
+  return {
+    ...page,
+    manualUnitIds: drop(page.manualUnitIds),
+    ocrMeta: page.ocrMeta ? { ...page.ocrMeta, unitIds: drop(page.ocrMeta.unitIds) } : page.ocrMeta,
+    drawingOcrMeta: page.drawingOcrMeta
+      ? { ...page.drawingOcrMeta, unitIds: drop(page.drawingOcrMeta.unitIds) }
+      : page.drawingOcrMeta,
+  };
 }
 
 export function pickLevelFromLines(

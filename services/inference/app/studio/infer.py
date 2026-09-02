@@ -50,22 +50,25 @@ def _run_on_drawing_crop(
     sy: float = 1.0,
 ) -> tuple[list[DetectedRegion], str | None]:
     """Tile inside ``main_floorplan`` when provided; otherwise single-pass full page."""
+    from app.yolo.compass_keypoints import transform_region_keypoints
     from app.yolo.crop import crop_page_normalized, full_page_crop, offset_bbox, offset_polygon
 
     warning: str | None = None
     client_crop = drawing_crop if isinstance(drawing_crop, dict) else None
     crop = None
-    tile_in_drawing = False
     if client_crop:
         crop = crop_page_normalized(rgb, client_crop, pad_frac=settings.yolo_crop_pad)
-        if crop:
-            tile_in_drawing = True
     if crop is None:
         crop = full_page_crop(rgb)
         if client_crop is None:
+            tiled = bool(getattr(settings, "detect_tile_enabled", True))
             warning = (
                 "No drawing area region — run layout detect or draw a drawing area box first. "
-                "Ran detection on the full page (single pass, not tiled)."
+                + (
+                    "Ran detection on the full page with tiling."
+                    if tiled
+                    else "Ran detection on the full page (single pass, not tiled)."
+                )
             )
 
     progress = map_progress_coords(
@@ -82,11 +85,12 @@ def _run_on_drawing_crop(
         tile_size=tile_size,
         on_progress=progress,
         cancel_check=cancel_check,
-        use_tiling=tile_in_drawing,
+        use_tiling=bool(getattr(settings, "detect_tile_enabled", True)),
     )
     for region in regions:
         region.polygon = offset_polygon(region.polygon, crop.x0, crop.y0)
         region.bbox = offset_bbox(region.bbox, crop.x0, crop.y0)
+        transform_region_keypoints(region.attributes, dx=float(crop.x0), dy=float(crop.y0))
     if stitch_walls:
         regions = stitch_wall_regions(regions)
     return regions, warning
@@ -281,6 +285,7 @@ def infer_local_studio_model(
     original_width: int | None = None,
     original_height: int | None = None,
     drawing_crop: dict[str, float] | None = None,
+    settings: Settings | None = None,
     on_progress: ProgressFn | None = None,
     cancel_check: CancelFn | None = None,
 ) -> DetectResult:
@@ -294,6 +299,7 @@ def infer_local_studio_model(
         original_height=original_height,
         architecture=str(model.get("architecture") or ""),
         drawing_crop=drawing_crop,
+        settings=settings,
         on_progress=on_progress,
         cancel_check=cancel_check,
     )

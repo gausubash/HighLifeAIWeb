@@ -72,19 +72,19 @@ export function ProjectSettingsPanel({
   return (
     <div className="space-y-4 overflow-y-auto p-4">
       <div>
-        <label htmlFor="project-name" className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+        <label htmlFor="project-name" className="hl-label">
           Name
         </label>
         <input
           id="project-name"
           value={name}
           onChange={(e) => setName(e.target.value)}
-          className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+          className="hl-input"
         />
       </div>
 
       <div>
-        <label htmlFor="project-description" className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+        <label htmlFor="project-description" className="hl-label">
           Description
         </label>
         <textarea
@@ -92,36 +92,40 @@ export function ProjectSettingsPanel({
           rows={3}
           value={description}
           onChange={(e) => setDescription(e.target.value)}
-          className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+          className="hl-input"
         />
       </div>
 
       <div>
-        <label htmlFor="project-jurisdiction" className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+        <label htmlFor="project-jurisdiction" className="hl-label">
           Jurisdiction
         </label>
         <input
           id="project-jurisdiction"
           value={jurisdiction}
           onChange={(e) => setJurisdiction(e.target.value)}
-          className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+          className="hl-input"
         />
       </div>
 
       <div>
-        <label htmlFor="project-policy" className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+        <label htmlFor="project-policy" className="hl-label">
           Policy version
         </label>
         <select
           id="project-policy"
           value={policyVersion}
           onChange={(e) => setPolicyVersion(e.target.value)}
-          className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+          className="hl-input"
         >
-          <option value="highlife_v1">highlife_v1 — Design Policy v1</option>
-          <option value="draft-v1">draft-v1 — Legacy draft</option>
+          <option value="hooper_apartment_rules_v1">
+            hooper_apartment_rules_v1 — Apartment design rules (Hooper 2022)
+          </option>
+          {policyVersion && policyVersion !== "hooper_apartment_rules_v1" ? (
+            <option value={policyVersion}>{policyVersion} (current)</option>
+          ) : null}
         </select>
-        <p className="mt-1 text-[10px] text-slate-500">
+        <p className="mt-1 text-xs text-slate-500">
           Used by Detect → Run policy check (configs/policies/version.yaml).
         </p>
       </div>
@@ -137,7 +141,7 @@ export function ProjectSettingsPanel({
       <hr className="border-slate-200" />
 
       <div className="space-y-2">
-        <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
           Danger zone
         </p>
         {confirmDelete ? (

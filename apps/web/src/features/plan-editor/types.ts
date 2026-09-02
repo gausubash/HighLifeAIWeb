@@ -26,11 +26,18 @@ export const OVERLAY_LAYERS: { id: OverlayLayerId; label: string; zIndex: number
 export type OverlayTool =
   | "pan"
   | "select"
+  | "marquee"
   | "rect"
   | "polyline"
   | "polygon"
   | "point"
   | "mask";
+
+export const POINTER_TOOLS: ReadonlySet<OverlayTool> = new Set(["pan", "select", "marquee"]);
+
+export function isPointerTool(tool: OverlayTool): boolean {
+  return POINTER_TOOLS.has(tool);
+}
 
 export type OverlayGeometry =
   | { kind: "rect"; x: number; y: number; width: number; height: number }
@@ -94,7 +101,7 @@ export const ENTITY_LAYER: Record<PlanEntityType, OverlayLayerId> = {
   revision_block: "layout",
 };
 
-export const TOOL_DEFAULT_TYPE: Record<Exclude<OverlayTool, "pan" | "select">, PlanEntityType> = {
+export const TOOL_DEFAULT_TYPE: Record<Exclude<OverlayTool, "pan" | "select" | "marquee">, PlanEntityType> = {
   rect: "room",
   polyline: "wall",
   polygon: "room",

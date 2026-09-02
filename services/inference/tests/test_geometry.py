@@ -67,6 +67,72 @@ def test_common_area_excluded_from_unit() -> None:
     assert units[0]["space_ids"] == ["r1"]
 
 
+def test_opening_type_for_main_door() -> None:
+    from app.yolo.classes import opening_type_for
+
+    assert opening_type_for("Main Door") == "unit_entrance"
+    assert opening_type_for("Single Door") == "internal_room_door"
+    assert opening_type_for("Window") == "window"
+    assert opening_type_for("Bedroom") is None
+
+
+def test_cluster_units_split_at_lobby() -> None:
+    from app.pipeline.unit_infer import infer_and_merge_units
+
+    entities = [
+        _entity("lobby", "room", (0, 0, 200, 40), "Lobby"),
+        _entity("bed-a", "room", (0, 50, 80, 80), "Bedroom"),
+        _entity("bath-a", "room", (10, 140, 60, 40), "Bathroom"),
+        _entity("bed-b", "room", (120, 50, 80, 80), "Bedroom"),
+        _entity("bath-b", "room", (130, 140, 60, 40), "Bathroom"),
+        _entity("main-a", "door", (30, 36, 16, 16), "Main Door"),
+        _entity("main-b", "door", (150, 36, 16, 16), "Main Door"),
+        _entity("int-a", "door", (30, 124, 16, 16), "Single Door"),
+        _entity("int-b", "door", (150, 124, 16, 16), "Single Door"),
+    ]
+    entities[5]["attributes"]["openingType"] = "unit_entrance"
+    entities[6]["attributes"]["openingType"] = "unit_entrance"
+
+    merged = infer_and_merge_units(entities, width_px=220, height_px=200)
+    units = [e for e in merged if e["type"] == "unit_boundary"]
+    assert len(units) == 2
+
+    rels = derive_relationships(merged)
+    kinds = {r["kind"] for r in rels}
+    assert "unit_contains_room" in kinds
+    assert "room_label_assignment" in kinds
+
+    out = units_from_entities(
+        merged,
+        rels,
+        width_px=220,
+        height_px=200,
+        area_by_room={"bed-a": 10.0, "bath-a": 4.0, "bed-b": 10.0, "bath-b": 4.0, "lobby": 8.0},
+    )
+    assert len(out) == 2
+    space_sets = [set(u["space_ids"]) for u in out]
+    assert {"bed-a", "bath-a"} in space_sets
+    assert {"bed-b", "bath-b"} in space_sets
+    for unit in out:
+        assert "lobby" not in unit["space_ids"]
+        assert len(unit["entrance_ids"]) >= 1
+        assert all(eid in {"main-a", "main-b"} for eid in unit["entrance_ids"])
+
+
+def test_existing_yolo_unit_not_duplicated() -> None:
+    from app.pipeline.unit_infer import infer_and_merge_units
+
+    entities = [
+        _entity("u1", "unit_boundary", (0, 0, 100, 100), "Unit 101"),
+        _entity("r1", "room", (10, 10, 40, 40), "Bedroom"),
+        _entity("d1", "door", (20, 5, 10, 10), "Main Door"),
+    ]
+    merged = infer_and_merge_units(entities, width_px=200, height_px=120)
+    units = [e for e in merged if e["type"] == "unit_boundary"]
+    assert len(units) == 1
+    assert units[0]["id"] == "u1"
+
+
 def test_hierarchy_build() -> None:
     from app.pipeline.hierarchy import build_building_hierarchy
 

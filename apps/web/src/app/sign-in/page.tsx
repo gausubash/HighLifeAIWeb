@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { FormEvent, Suspense, useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth/AuthProvider";
+import { isCloudSupabase } from "@/lib/supabase/env";
 
 function SignInForm() {
   const { user, ready, configured, signIn, signUp } = useAuth();
@@ -37,37 +38,44 @@ function SignInForm() {
   };
 
   return (
-    <div className="flex min-h-dvh flex-col bg-[var(--hl-paper)]">
-      <header className="border-b border-[var(--hl-line)] bg-white/70">
-        <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-5 sm:px-8">
-          <Link href="/" className="font-display text-lg font-semibold tracking-tight">
-            HighLife
-          </Link>
-          <Link href="/" className="text-sm text-slate-600 hover:text-[var(--hl-moss)]">
-            Back to home
-          </Link>
-        </div>
+    <div className="hl-workbench flex min-h-dvh flex-col p-0.5">
+      <header className="hl-menu-island mx-auto flex h-12 w-full max-w-6xl items-center justify-between px-4">
+        <Link href="/" className="font-display text-lg font-semibold tracking-tight">
+          HighLife
+        </Link>
+        <Link href="/" className="rounded px-2 py-1 text-sm text-slate-600 hover:bg-slate-50 hover:text-[var(--hl-moss)]">
+          Back to home
+        </Link>
       </header>
 
-      <main className="mx-auto flex w-full max-w-md flex-1 flex-col justify-center px-5 py-12">
+      <main className="mx-auto flex w-full max-w-md flex-1 flex-col justify-center px-2 py-12">
+        <div className="hl-island p-6">
         <h1 className="font-display text-3xl font-semibold tracking-tight">
           {mode === "signup" ? "Create account" : "Sign in"}
         </h1>
         <p className="mt-2 text-sm text-slate-600">
-          Use your HighLife email and a password (at least 6 characters). Projects and drawings are
-          stored in Supabase. Detect still runs on this PC at localhost:8000.
+          Use an email and a password (at least 6 characters). Projects and drawings stay on this
+          PC in local Docker (Supabase). Detect runs on this machine at localhost:8000.
         </p>
+
+        {isCloudSupabase() ? (
+          <p className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900">
+            This app is pointed at cloud Supabase. Run <code>npm run data:start</code> so auth and
+            PDFs stay on this computer.
+          </p>
+        ) : null}
 
         {!configured && (
           <p className="mt-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
             Add NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY to{" "}
-            <code>apps/web/.env.local</code>, then restart the Next.js server.
+            <code>apps/web/.env.local</code> by running <code>npm run data:start</code>, then restart
+            Next.js.
           </p>
         )}
 
         <form onSubmit={onSubmit} className="mt-8 space-y-4">
           <div>
-            <label htmlFor="email" className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+            <label htmlFor="email" className="hl-label">
               Email
             </label>
             <input
@@ -77,11 +85,11 @@ function SignInForm() {
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+              className="hl-input"
             />
           </div>
           <div>
-            <label htmlFor="password" className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+            <label htmlFor="password" className="hl-label">
               Password
             </label>
             <input
@@ -92,7 +100,7 @@ function SignInForm() {
               minLength={6}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+              className="hl-input"
             />
           </div>
 
@@ -123,6 +131,7 @@ function SignInForm() {
         >
           {mode === "signup" ? "Already have an account? Sign in" : "Need an account? Create one"}
         </button>
+        </div>
       </main>
     </div>
   );

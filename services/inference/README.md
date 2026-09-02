@@ -34,23 +34,23 @@ Copy `.env.example` to `.env` and keep `RUN_MODE=mock` / `DEVICE=cpu`.
 
 ## Page detect overlay (CPU OK)
 
-The plan viewer calls `POST /v1/detect`. Layout cropping and the Architect fixture model are **off** by default. Walls run on the **full page** (MitUNet). Set `USE_LAYOUT_DETECTOR=true` / `YOLO_WEIGHTS` and `USE_ROOM_DETECTOR=true` / `YOLO_ROOM_WEIGHTS` when you have those models.
+The plan viewer calls `POST /v1/detect` with a **task-specific** model token:
 
-Set `WALL_BACKEND=yolo` for oriented wall boxes. Legacy MMDet checkpoints (`cascade_swin`, `faster_rcnn`, `retinanet`) download from [Google Drive weights](https://drive.google.com/drive/folders/1MgW3Qo-8K4OrHi4ebvYd-81cTqQxwLgz) into `models/`.
+| Token | Task | Weights |
+|-------|------|---------|
+| `wall:mitunet` (default) | Wall segmentation | `models/mitunet_walls.pth` |
+| `wall:roboflow` | ArchVision wall instances | Roboflow `archvision_wall_detect/1` (`ROBOFLOW_API_KEY`) |
+| `room:architect` | Room types | `models/architect_floorplan.pt` |
+| `room:roboflow` | Office room masks | Roboflow `floorplan-9fxye/1` (`ROBOFLOW_API_KEY`) |
+| `structural:roboflow-seg` | Walls, doors, windows (instance seg) | Roboflow `floorplan-segmentation-imdze/4` |
+| `opening:architect` | Doors / windows (Architect YOLO) | `models/architect_floorplan.pt` |
+| `object:architect` | Stairs / lifts | same Architect checkpoint |
+| `layout:greenmap` | Sheet layout (Layout tab) | `yolo_layout.pt` / `YOLO_WEIGHTS` |
+| `studio:<uuid>` | Fine-tuned Studio model | Model Studio export |
 
-### Roboflow floorplan-iculh (local ONNX)
+Wall Detect is **MitUNet** (`wall:mitunet`) or **ArchVision Roboflow** (`wall:roboflow`).
 
-Universe models are not a public `.pt` download. Prefetch caches an ONNX under `models/roboflow_cache/` (uses your API key once), then Detect runs on-device via Ultralytics:
-
-```bash
-# needs Python 3.10–3.12 (.venv-tf) + inference package
-.venv-tf\Scripts\python.exe -m pip install inference
-.venv-tf\Scripts\python.exe scripts/prefetch_roboflow.py
-```
-
-Then pick **Roboflow floorplan-iculh/1** in Detect (`wall:roboflow`). Cloud API remains a fallback if the ONNX cache is missing.
-
-First detect may download MitUNet weights. Optional cache: `models/mitunet_walls.pth`.
+First wall detect may download MitUNet weights. Optional cache: `models/mitunet_walls.pth`.
 
 ```bash
 cd services/inference
@@ -61,7 +61,7 @@ uvicorn app.api:app --reload --host 127.0.0.1 --port 8000
 | Method | Path | Purpose |
 |--------|------|---------|
 | GET | `/health` | Mode, device, `yolo_ready`, `wall_ready`, `room_ready` |
-| POST | `/v1/detect` | Walls on the full page (layout/Architect optional) |
+| POST | `/v1/detect` | Task-specific overlay (walls / rooms / objects / layout) |
 | POST | `/v1/analyze` | Run one analysis (mock fixture today) |
 
 ```bash

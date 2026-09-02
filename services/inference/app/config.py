@@ -42,6 +42,10 @@ class Settings(BaseSettings):
     use_layout_detector: bool = Field(default=False, alias="USE_LAYOUT_DETECTOR")
     layout_only: bool = False
     use_room_detector: bool = Field(default=False, alias="USE_ROOM_DETECTOR")
+    # Runtime detect family: walls | rooms | objects | layout
+    detect_task: str = Field(default="walls", alias="DETECT_TASK")
+    # Room detector: architect (YOLO) or roboflow (Universe floorplan-9fxye)
+    room_backend: str = Field(default="architect", alias="ROOM_BACKEND")
     yolo_weights: str = Field(default="", alias="YOLO_WEIGHTS")
     yolo_conf: float = Field(default=0.25, alias="YOLO_CONF")
     yolo_imgsz: int = Field(default=1280, alias="YOLO_IMGSZ")
@@ -110,6 +114,8 @@ class Settings(BaseSettings):
     vlm_api_url: str = Field(default="", alias="VLM_API_URL")
     vlm_api_key: str = Field(default="", alias="VLM_API_KEY")
     vlm_model: str = Field(default="", alias="VLM_MODEL")
+    # Never POST floor-plan rasters to VLM_API_URL unless explicitly opted in.
+    vlm_allow_remote_images: bool = Field(default=False, alias="VLM_ALLOW_REMOTE_IMAGES")
     # Local PaddleOCR (Python 3.10–3.12; default interpreter: .venv-tf)
     paddle_ocr_enabled: bool = Field(default=False, alias="PADDLE_OCR_ENABLED")
     paddle_ocr_python: str = Field(default="", alias="PADDLE_OCR_PYTHON")
@@ -146,9 +152,29 @@ class Settings(BaseSettings):
 
     roboflow_api_key: str = Field(default="", alias="ROBOFLOW_API_KEY")
     roboflow_model_id: str = Field(default="floorplan-iculh/1", alias="ROBOFLOW_MODEL_ID")
+    roboflow_wall_model_id: str = Field(
+        default="archvision_wall_detect/1",
+        alias="ROBOFLOW_WALL_MODEL_ID",
+    )
+    roboflow_room_model_id: str = Field(
+        default="floorplan-9fxye/1",
+        alias="ROBOFLOW_ROOM_MODEL_ID",
+    )
     roboflow_conf: float = Field(default=0.25, alias="ROBOFLOW_CONF")
     # Optional path to cached ONNX/PT (default: models/roboflow_cache/.../weights.onnx)
     roboflow_weights: str = Field(default="", alias="ROBOFLOW_WEIGHTS")
+    roboflow_wall_weights: str = Field(default="", alias="ROBOFLOW_WALL_WEIGHTS")
+    roboflow_room_weights: str = Field(default="", alias="ROBOFLOW_ROOM_WEIGHTS")
+    roboflow_floorplan_seg_model_id: str = Field(
+        default="floorplan-segmentation-imdze/4",
+        alias="ROBOFLOW_FLOORPLAN_SEG_MODEL_ID",
+    )
+    roboflow_floorplan_seg_weights: str = Field(
+        default="",
+        alias="ROBOFLOW_FLOORPLAN_SEG_WEIGHTS",
+    )
+    # Runtime opening specialist: architect | roboflow-seg (set by detect token)
+    opening_backend: str = ""
 
 
 @lru_cache

@@ -1,7 +1,7 @@
 import type { PlanEntityType } from "@highlife/shared-types";
 import { geometryBBox } from "@/features/plan-editor/types";
 import { pageKey, useOverlayStore } from "@/features/plan-editor/useOverlayStore";
-import type { SheetOcrMeta } from "@/lib/api/ocrClient";
+import type { OcrFrame, SheetOcrMeta } from "@/lib/api/ocrClient";
 import {
   A_PAPER_SIZES_MM,
   canonicalScaleText,
@@ -60,7 +60,7 @@ export function findLayoutRegion(
   pageWidthPx: number,
   pageHeightPx: number,
   entityType: PlanEntityType,
-  options?: { maxAreaFrac?: number; preferSmallest?: boolean },
+  options?: { maxAreaFrac?: number; preferSmallest?: boolean; padFrac?: number },
 ): LayoutRegionInfo | null {
   if (pageWidthPx < 1 || pageHeightPx < 1) return null;
   const key = pageKey(analysisId, pageNumber);
@@ -107,12 +107,15 @@ export function findLayoutRegion(
   });
 
   const best = pool[0];
-  const crop = padNormalizedCrop({
+  const cropRaw = {
     x: best.bbox.x / pageWidthPx,
     y: best.bbox.y / pageHeightPx,
     width: best.bbox.width / pageWidthPx,
     height: best.bbox.height / pageHeightPx,
-  });
+  };
+  const padFrac = options?.padFrac;
+  const crop =
+    padFrac === 0 ? cropRaw : padNormalizedCrop(cropRaw, padFrac ?? PAD_FRAC);
   if (crop.width <= 0 || crop.height <= 0) return null;
 
   return {
@@ -163,7 +166,9 @@ export function findDrawingAreaRegion(
   pageWidthPx: number,
   pageHeightPx: number,
 ): LayoutRegionInfo | null {
-  return findLayoutRegion(analysisId, pageNumber, pageWidthPx, pageHeightPx, "main_floorplan");
+  return findLayoutRegion(analysisId, pageNumber, pageWidthPx, pageHeightPx, "main_floorplan", {
+    padFrac: 0,
+  });
 }
 
 export function findDrawingAreaCrop(
@@ -257,6 +262,154 @@ export function applyScaleFromOcrText(
   return false;
 }
 
+export type PixelCrop = {
+  x0: number;
+  y0: number;
+  width: number;
+  height: number;
+  sourceWidth: number;
+  sourceHeight: number;
+};
+
+export function ocrBboxPoints(bbox: unknown): [number, number][] | null {
+  if (!Array.isArray(bbox) || bbox.length < 2) return null;
+  const asNum = (v: unknown) =>
+    typeof v === "number" || (typeof v === "string" && v.trim() !== "" && Number.isFinite(Number(v)));
+  if (bbox.length >= 4 && bbox.every(asNum)) {
+    const nums = bbox.map(Number);
+    if (nums.length >= 8) {
+      return [
+        [nums[0], nums[1]],
+        [nums[2], nums[3]],
+        [nums[4], nums[5]],
+        [nums[6], nums[7]],
+      ];
+    }
+    const [x0, y0, x1, y1] = nums;
+    return [
+      [x0, y0],
+      [x1, y0],
+      [x1, y1],
+      [x0, y1],
+    ];
+  }
+  const pts: [number, number][] = [];
+  for (const p of bbox) {
+    if (Array.isArray(p) && p.length >= 2 && Number.isFinite(Number(p[0])) && Number.isFinite(Number(p[1]))) {
+      pts.push([Number(p[0]), Number(p[1])]);
+      continue;
+    }
+    if (p && typeof p === "object") {
+      const x = Number((p as { x?: unknown }).x);
+      const y = Number((p as { y?: unknown }).y);
+      if (Number.isFinite(x) && Number.isFinite(y)) pts.push([x, y]);
+    }
+  }
+  return pts.length >= 2 ? pts : null;
+}
+
+/** Actual PNG pixels cropped for OCR, as 0–1 of that PNG. */
+export function pixelCropToNormalized(pixel: PixelCrop): NormalizedCrop {
+  const sw = Math.max(1, pixel.sourceWidth);
+  const sh = Math.max(1, pixel.sourceHeight);
+  return {
+    x: pixel.x0 / sw,
+    y: pixel.y0 / sh,
+    width: pixel.width / sw,
+    height: pixel.height / sh,
+  };
+}
+
+/** Frame that projects crop-local Paddle boxes onto any later page size (DPI / paper). */
+export function ocrFrameFromPixelCrop(
+  pixel: PixelCrop,
+  pageWidthPx: number,
+  pageHeightPx: number,
+): OcrFrame {
+  return {
+    layoutCrop: pixelCropToNormalized(pixel),
+    ocrWidthPx: pixel.width,
+    ocrHeightPx: pixel.height,
+    pageWidthPx,
+    pageHeightPx,
+  };
+}
+
+/** Scale OCR quads from one raster size onto another (same crop, different pixel grid). */
+export function scaleOcrBboxes(
+  sheet: SheetOcrMeta,
+  fromWidthPx: number,
+  fromHeightPx: number,
+  toWidthPx: number,
+  toHeightPx: number,
+): SheetOcrMeta {
+  if (fromWidthPx <= 0 || fromHeightPx <= 0 || toWidthPx <= 0 || toHeightPx <= 0) return sheet;
+  const sx = toWidthPx / fromWidthPx;
+  const sy = toHeightPx / fromHeightPx;
+  if (Math.abs(sx - 1) < 1e-6 && Math.abs(sy - 1) < 1e-6) return sheet;
+  return {
+    ...sheet,
+    lines: (sheet.lines ?? []).map((line) => {
+      const pts = ocrBboxPoints(line.bbox);
+      if (!pts) return line;
+      return {
+        ...line,
+        bbox: pts.map(([x, y]) => [x * sx, y * sy] as [number, number]),
+      };
+    }),
+  };
+}
+
+/**
+ * Project a crop-local OCR quad onto the current page.
+ * `layoutCrop` is the title/drawing box (0–1 of the page image). `ocrWidthPx` is
+ * the raster Paddle actually read. Current `pageWidthPx` carries DPI / paper size.
+ */
+export function mapOcrPointsToPage(
+  pts: [number, number][],
+  crop: NormalizedCrop,
+  pageWidthPx: number,
+  pageHeightPx: number,
+  ocrWidthPx: number,
+  ocrHeightPx: number,
+): [number, number][] {
+  const region = layoutCropToPageRect(crop, pageWidthPx, pageHeightPx);
+  const sx = ocrWidthPx > 0 ? region.width / ocrWidthPx : 1;
+  const sy = ocrHeightPx > 0 ? region.height / ocrHeightPx : 1;
+  return pts.map(([x, y]) => [region.x + x * sx, region.y + y * sy]);
+}
+
+export function remapOcrLinesFromPixelCrop(
+  sheet: SheetOcrMeta,
+  pixel: PixelCrop,
+  pageWidthPx: number,
+  pageHeightPx: number,
+  ocrCropWidthPx: number,
+  ocrCropHeightPx: number,
+): SheetOcrMeta {
+  const sxSrc = pixel.sourceWidth > 0 ? pageWidthPx / pixel.sourceWidth : 1;
+  const sySrc = pixel.sourceHeight > 0 ? pageHeightPx / pixel.sourceHeight : 1;
+  const sxOcr = ocrCropWidthPx > 0 ? pixel.width / ocrCropWidthPx : 1;
+  const syOcr = ocrCropHeightPx > 0 ? pixel.height / ocrCropHeightPx : 1;
+  return {
+    ...sheet,
+    lines: (sheet.lines ?? []).map((line) => {
+      const pts = ocrBboxPoints(line.bbox);
+      if (!pts) return line;
+      return {
+        ...line,
+        bbox: pts.map(
+          ([x, y]) =>
+            [pixel.x0 * sxSrc + x * sxOcr * sxSrc, pixel.y0 * sySrc + y * syOcr * sySrc] as [
+              number,
+              number,
+            ],
+        ),
+      };
+    }),
+  };
+}
+
 export function remapOcrLinesToLayoutRegion(
   sheet: SheetOcrMeta,
   layoutCrop: NormalizedCrop,
@@ -265,20 +418,89 @@ export function remapOcrLinesToLayoutRegion(
   ocrCropWidthPx: number,
   ocrCropHeightPx: number,
 ): SheetOcrMeta {
-  const rx = layoutCrop.x * pageWidthPx;
-  const ry = layoutCrop.y * pageHeightPx;
-  const rw = layoutCrop.width * pageWidthPx;
-  const rh = layoutCrop.height * pageHeightPx;
-  const sx = ocrCropWidthPx > 0 ? rw / ocrCropWidthPx : 1;
-  const sy = ocrCropHeightPx > 0 ? rh / ocrCropHeightPx : 1;
-  return {
-    ...sheet,
-    lines: (sheet.lines ?? []).map((line) => ({
-      ...line,
-      bbox:
-        line.bbox?.map(([x, y]) => [rx + x * sx, ry + y * sy] as [number, number]) ?? line.bbox,
-    })),
-  };
+  return remapOcrLinesFromPixelCrop(
+    sheet,
+    {
+      x0: layoutCrop.x * pageWidthPx,
+      y0: layoutCrop.y * pageHeightPx,
+      width: layoutCrop.width * pageWidthPx,
+      height: layoutCrop.height * pageHeightPx,
+      sourceWidth: pageWidthPx,
+      sourceHeight: pageHeightPx,
+    },
+    pageWidthPx,
+    pageHeightPx,
+    ocrCropWidthPx,
+    ocrCropHeightPx,
+  );
+}
+
+/** If saved drawing OCR is still crop-local, lift it into page pixels. */
+export function ensureOcrLinesInPageSpace(
+  sheet: SheetOcrMeta | null | undefined,
+  crop: NormalizedCrop | null | undefined,
+  pageWidthPx: number,
+  pageHeightPx: number,
+): SheetOcrMeta | null | undefined {
+  if (!sheet?.lines?.length || pageWidthPx < 1 || pageHeightPx < 1) return sheet;
+  if (sheet.coordSpace === "page") return sheet;
+  const frame = sheet.ocrFrame;
+  const usedCrop = frame?.layoutCrop ?? crop;
+  if (frame && usedCrop && frame.ocrWidthPx > 0 && frame.ocrHeightPx > 0) {
+    return {
+      ...sheet,
+      coordSpace: "page",
+      lines: sheet.lines.map((line) => {
+        const pts = ocrBboxPoints(line.bbox);
+        if (!pts) return line;
+        return {
+          ...line,
+          bbox: mapOcrPointsToPage(
+            pts,
+            usedCrop,
+            pageWidthPx,
+            pageHeightPx,
+            frame.ocrWidthPx,
+            frame.ocrHeightPx,
+          ),
+        };
+      }),
+    };
+  }
+  if (!usedCrop) return sheet;
+  const rx = usedCrop.x * pageWidthPx;
+  const ry = usedCrop.y * pageHeightPx;
+  const rw = usedCrop.width * pageWidthPx;
+  const rh = usedCrop.height * pageHeightPx;
+  if (rw < 8 || rh < 8) return sheet;
+  // Crop is the full page (or its origin is the page origin) — already page space.
+  if (rx < 12 && ry < 12) return sheet;
+
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const line of sheet.lines) {
+    const pts = ocrBboxPoints(line.bbox);
+    if (!pts) continue;
+    for (const [x, y] of pts) {
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x);
+      maxY = Math.max(maxY, y);
+    }
+  }
+  if (!Number.isFinite(minX)) return sheet;
+
+  // Page-space labels that cover the drawing stick out past the crop size.
+  if (maxX > rw * 1.05 + 8 || maxY > rh * 1.05 + 8) return sheet;
+
+  const originSlop = Math.max(12, Math.min(rx, ry, 40));
+  const startsBeforeDrawing = minX < rx - originSlop || minY < ry - originSlop;
+  const fitsAsCrop = minX >= -16 && minY >= -16 && maxX <= rw * 1.05 && maxY <= rh * 1.05;
+  if (!fitsAsCrop || !startsBeforeDrawing) return sheet;
+
+  return remapOcrLinesToLayoutRegion(sheet, usedCrop, pageWidthPx, pageHeightPx, rw, rh);
 }
 
 export type PixelRect = { x: number; y: number; width: number; height: number };
@@ -336,8 +558,11 @@ export function remapOcrLinesToPage(
   };
 }
 
-/** Crop a page image blob using normalized fractions. */
-export async function cropImageBlob(blob: Blob, crop: NormalizedCrop): Promise<Blob> {
+/** Crop a page image blob using normalized fractions. Returns the pixel rect used. */
+export async function cropImageBlob(
+  blob: Blob,
+  crop: NormalizedCrop,
+): Promise<{ blob: Blob; pixel: PixelCrop }> {
   const bitmap = await createImageBitmap(blob);
   const x0 = Math.max(0, Math.floor(crop.x * bitmap.width));
   const y0 = Math.max(0, Math.floor(crop.y * bitmap.height));
@@ -351,8 +576,16 @@ export async function cropImageBlob(blob: Blob, crop: NormalizedCrop): Promise<B
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("Could not crop page image.");
   ctx.drawImage(bitmap, x0, y0, width, height, 0, 0, width, height);
+  const pixel: PixelCrop = {
+    x0,
+    y0,
+    width,
+    height,
+    sourceWidth: bitmap.width,
+    sourceHeight: bitmap.height,
+  };
   bitmap.close();
   const out = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
   if (!out) throw new Error("Could not encode cropped page image.");
-  return out;
+  return { blob: out, pixel };
 }

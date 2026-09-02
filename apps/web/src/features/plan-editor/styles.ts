@@ -54,6 +54,11 @@ export const CLASS_SWATCH: Record<string, string> = {
   unit: "#a855f7",
   wall: "#eab308",
   external_wall: "#ca8a04",
+  internal_wall: "#64748b",
+  /** Walls classified external by thickness threshold. */
+  wall_external: "#dc2626",
+  /** Walls classified internal by thickness threshold. */
+  wall_internal: "#94a3b8",
   door: "#ea580c",
   single_door: "#ea580c",
   sliding_door: "#c2410c",
@@ -69,6 +74,9 @@ export const CLASS_SWATCH: Record<string, string> = {
   "legend block": "#f59e0b",
   title_block: "#0f766e",
   "title block": "#0f766e",
+  north_arrow: "#0f766e",
+  "north arrow": "#0f766e",
+  compass: "#0f766e",
   drawing_border: "#64748b",
   "drawing border": "#64748b",
   revision_block: "#7c3aed",
@@ -91,7 +99,15 @@ export const CLASS_SWATCH: Record<string, string> = {
 export function classSwatch(label?: unknown): string {
   if (typeof label !== "string") return CLASS_SWATCH.default;
   const key = label.toLowerCase().replace(/\s+/g, "_");
-  return CLASS_SWATCH[key] ?? CLASS_SWATCH.default;
+  if (CLASS_SWATCH[key]) return CLASS_SWATCH[key];
+  if (key === "unit_boundary" || key.startsWith("unit_")) return CLASS_SWATCH.unit;
+  return CLASS_SWATCH.default;
+}
+
+export type WallThicknessClass = "internal" | "external";
+
+export function wallClassificationSwatch(kind: WallThicknessClass): string {
+  return kind === "external" ? CLASS_SWATCH.wall_external : CLASS_SWATCH.wall_internal;
 }
 
 export function dashForStatus(status: string): number[] | undefined {

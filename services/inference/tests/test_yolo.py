@@ -6,6 +6,7 @@ from io import BytesIO
 from pathlib import Path
 
 import numpy as np
+import yaml
 from PIL import Image
 
 import pytest
@@ -120,6 +121,87 @@ def test_convert_labelme_single_page_random_split_fills_val(tmp_path: Path) -> N
     assert stats.train == 1
     assert stats.val == 1
     assert (out / "images" / "val" / "20_1.png").is_file()
+
+
+def test_convert_labelme_pose_writes_tip_base(tmp_path: Path) -> None:
+    src = tmp_path / "labelme"
+    src.mkdir()
+    payload = {
+        "shapes": [
+            {
+                "label": "North",
+                "shape_type": "rectangle",
+                "points": [[0, 0], [10, 20]],
+                "flags": {
+                    "keypoints": [
+                        {"name": "base", "x": 5, "y": 18},
+                        {"name": "tip", "x": 5, "y": 2},
+                    ]
+                },
+            }
+        ],
+        "imagePath": "n1.png",
+        "imageData": _png_b64(20, 20),
+        "imageWidth": 20,
+        "imageHeight": 20,
+    }
+    (src / "n1.json").write_text(json.dumps(payload), encoding="utf-8")
+    out = tmp_path / "yolo"
+    stats = convert_labelme_dir(src, out, fold=None, class_names=["North Arrow"], task="pose")
+    assert stats.instances == 1
+    line = (out / "labels" / "train" / "n1.txt").read_text(encoding="utf-8").strip()
+    parts = [float(x) for x in line.split()]
+    assert parts[0] == 0
+    assert len(parts) == 11
+    assert parts[5:8] == pytest.approx([0.25, 0.9, 2.0])
+    assert parts[8:11] == pytest.approx([0.25, 0.1, 2.0])
+    data = (out / "data.yaml").read_text(encoding="utf-8")
+    assert "kpt_shape" in data
+    assert "[2, 3]" in data or "- 2" in data
+
+
+def test_convert_labelme_pose_drops_unused_layout_classes(tmp_path: Path) -> None:
+    src = tmp_path / "labelme"
+    src.mkdir()
+    payload = {
+        "shapes": [
+            {
+                "label": "North Arrow",
+                "shape_type": "rectangle",
+                "points": [[0, 0], [10, 20]],
+                "flags": {
+                    "keypoints": [
+                        {"name": "base", "x": 5, "y": 18},
+                        {"name": "tip", "x": 5, "y": 2},
+                    ]
+                },
+            }
+        ],
+        "imagePath": "n1.png",
+        "imageData": _png_b64(20, 20),
+        "imageWidth": 20,
+        "imageHeight": 20,
+    }
+    (src / "n1.json").write_text(json.dumps(payload), encoding="utf-8")
+    out = tmp_path / "yolo"
+    convert_labelme_dir(
+        src,
+        out,
+        fold=None,
+        class_names=[
+            "North Arrow",
+            "Title block",
+            "Drawing area",
+            "Legend block",
+            "Drawing border",
+            "Revision block",
+        ],
+        task="pose",
+    )
+    data = yaml.safe_load((out / "data.yaml").read_text(encoding="utf-8"))
+    assert list(data["names"].values()) == ["North Arrow"]
+    line = (out / "labels" / "train" / "n1.txt").read_text(encoding="utf-8").strip()
+    assert line.startswith("0 ")
 
 
 class _Arr:

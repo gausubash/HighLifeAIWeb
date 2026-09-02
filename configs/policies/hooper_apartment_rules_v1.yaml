@@ -1,0 +1,81 @@
+# Apartment design rules — Hooper et al. 2022, MethodsX Table 1.
+# Full 122-row catalog lives in apartment_rules_complete.json and the web Policy pack.
+# This YAML is the plan-checkable subset for the inference service.
+
+version: hooper_apartment_rules_v1
+name: Apartment design rules (Hooper 2022)
+jurisdiction: SEPP65 / SPP7.3 / BADS
+description: >
+  Mapped plan checks from Hooper et al. 2022. The web Policy tab lists all 122
+  Table 1 rows; only this subset is evaluated against extracted apartments.
+
+rules:
+  - code: STUDIO_MIN_35M2
+    name: Studio min 35 m²
+    kind: apartment_min_internal
+    clause: SEPP65 · SPP7.3 · apartment
+    severity: fail
+    requires_scale: true
+    by_bedrooms: { "0": 35, "1": 50, "2": 70, "3": 90 }
+    explanation: "{label}: internal {measured} m² is below {required} m² for a {beds}-bed dwelling."
+
+  - code: OTHER_BEDROOM_MIN_9M2
+    name: Other bedroom min 9 m²
+    kind: apartment_min_bedroom
+    clause: SEPP65 · SPP7.3 · apartment
+    severity: fail
+    requires_scale: true
+    min_area_m2: 9
+    min_dimension_m: 3
+    explanation: "{label} bedroom {measured} m² is below the {required} m² minimum."
+
+  - code: LIVING_ROOM_MIN_16M2
+    name: Living room min 16 m²
+    kind: apartment_min_living
+    clause: SEPP65 · SPP7.3 · apartment
+    severity: fail
+    requires_scale: true
+    min_area_m2: 16
+    min_dimension_m: 3.6
+    explanation: "{label}: living {measured} m² is below {required} m²."
+
+  - code: BALCONY_1BED_MIN_8M2
+    name: Balcony 1-bed min 8 m²
+    kind: apartment_min_pos
+    clause: SEPP65 · SPP7.3 · apartment
+    severity: fail
+    requires_scale: true
+    by_bedrooms: { "0": 4, "1": 8, "2": 10, "3": 12 }
+    min_dimension_m: 2
+    explanation: "{label}: private open space {measured} m² is below {required} m² (min dimension {dim} m)."
+
+  - code: STORAGE_1BED_MIN_6M3
+    name: Storage 1-bed min 6 m³
+    kind: apartment_min_storage
+    clause: SEPP65 · SPP7.3 · apartment
+    severity: fail
+    min_count: 1
+    explanation: "{label}: no dedicated store / robe space labelled on the plan."
+
+  - code: VENTILATION_OPPOSITE_FACADES
+    name: Ventilation opposite facades
+    kind: apartment_dual_aspect
+    clause: SEPP65 · SPP7.3 · BADS · apartment
+    severity: fail
+    explanation: "{label}: windows are not on two sides (or north/window data is missing)."
+
+  - code: HABITABLE_ROOMS_WINDOW
+    name: Habitable rooms window
+    kind: habitable_has_window
+    clause: SEPP65 · SPP7.3 · BADS · apartment
+    severity: fail
+    explanation: "{label}: habitable rooms without an exterior window: {missing}."
+
+  - code: COMMUNAL_OPEN_SPACE_MIN_25M2_PER_APT
+    name: Communal open space min 25 m² per apt
+    kind: communal_open_space
+    clause: SEPP65 · SPP7.3 · building
+    severity: fail
+    requires_scale: true
+    m2_per_dwelling: 25
+    explanation: "Communal outdoor space {measured} m² is below {required} m² ({per} m² × {dwellings} dwellings)."

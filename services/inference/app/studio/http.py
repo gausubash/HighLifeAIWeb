@@ -17,6 +17,7 @@ from app.studio.local_store import (
     convert_dataset_to_yolo,
     create_dataset,
     create_dataset_tiles,
+    export_annotation_crops,
     create_job,
     delete_dataset,
     delete_job,
@@ -43,6 +44,7 @@ from app.studio.local_store import (
     unlink_source,
     update_page_size,
     update_dataset_class_names,
+    update_dataset_purpose,
 )
 from app.yolo.classes import CLASS_NAMES
 
@@ -82,6 +84,7 @@ class PageSplitBody(BaseModel):
 class UpdateDatasetBody(BaseModel):
     classNames: list[str] | None = None
     class_names: list[str] | None = None
+    category: str | None = None
 
 
 class ActivateBody(BaseModel):
@@ -169,9 +172,13 @@ def studio_delete_dataset(dataset_id: str) -> dict:
 @router.patch("/datasets/{dataset_id}")
 def studio_patch_dataset(dataset_id: str, body: UpdateDatasetBody) -> dict:
     names = body.classNames or body.class_names
-    if not names:
-        return _error(400, "INVALID_BODY", "classNames is required.")
+    category = (body.category or "").strip() or None
+    if not names and not category:
+        return _error(400, "INVALID_BODY", "category or classNames is required.")
     try:
+        if category:
+            parsed = parse_class_names(names) if names else None
+            return update_dataset_purpose(dataset_id, category, class_names=parsed)
         return update_dataset_class_names(dataset_id, parse_class_names(names))
     except ValueError as exc:
         return _error(400, "INVALID_CLASS_NAMES", str(exc))
@@ -222,6 +229,25 @@ class CreateTilesBody(BaseModel):
     minSide: int | None = None
     onlyLabeled: bool = False
     replaceExisting: bool = True
+    skipUnlabeled: bool = False
+
+
+class ExportCropSelection(BaseModel):
+    pageId: str = Field(min_length=1)
+    label: str = Field(min_length=1)
+    points: list[list[float]]
+    shapeType: str | None = None
+
+
+class ExportCropsBody(BaseModel):
+    classLabels: list[str] | None = None
+    pageIds: list[str] | None = None
+    selections: list[ExportCropSelection] | None = None
+    targetName: str | None = None
+    category: str | None = None
+    paddingFrac: float = 0.25
+    minSidePx: int = 64
+    square: bool = True
 
 
 @router.post("/datasets/{dataset_id}/upload")
@@ -404,6 +430,26 @@ def studio_create_tiles(dataset_id: str, body: CreateTilesBody) -> dict:
             min_side=body.minSide,
             only_labeled=body.onlyLabeled,
             replace_existing=body.replaceExisting,
+            skip_unlabeled=body.skipUnlabeled,
+        )
+    except StudioStoreError as exc:
+        return _store_error(exc)
+
+
+@router.post("/datasets/{dataset_id}/export-crops")
+def studio_export_crops(dataset_id: str, body: ExportCropsBody) -> dict:
+    """Crop selected classes or overlays into a new fine-tune dataset."""
+    try:
+        return export_annotation_crops(
+            dataset_id,
+            class_labels=body.classLabels,
+            page_ids=body.pageIds,
+            selections=[item.model_dump() for item in (body.selections or [])] or None,
+            target_name=body.targetName,
+            category=body.category,
+            padding_frac=body.paddingFrac,
+            min_side_px=body.minSidePx,
+            square=body.square,
         )
     except StudioStoreError as exc:
         return _store_error(exc)
@@ -445,40 +491,64 @@ def studio_export_yolo_zip(dataset_id: str):
     )
 
 
+def _job_with_monitor(job: dict) -> dict:
+    from app.studio.train_monitor import monitor_payload
+
+    return {**job, **monitor_payload(str(job.get("id") or ""))}
+
+
 @router.get("/jobs")
 def studio_list_jobs() -> dict:
-    return {"jobs": list_jobs()}
+    return {"jobs": [_job_with_monitor(job) for job in list_jobs()]}
 
 
 @router.get("/jobs/{job_id}")
 def studio_get_job(job_id: str):
     try:
-        return get_job(job_id)
+        return _job_with_monitor(get_job(job_id))
     except StudioStoreError as exc:
         return _store_error(exc)
 
 
 @router.get("/jobs/{job_id}/preview.png")
-def studio_job_preview(job_id: str):
-    """Latest segmentation overlay from training (updated each epoch when possible)."""
+def studio_job_preview(job_id: str, epoch: int | None = None, kind: str | None = None):
+    """Prediction overlay (optionally for an epoch) or the ground-truth overlay."""
+    from app.studio.train_monitor import find_plot, resolve_epoch_preview
+
     try:
         get_job(job_id)
     except StudioStoreError as exc:
         return _store_error(exc)
-    preview = job_artifacts_dir(job_id) / "preview.png"
-    if preview.is_file():
-        return FileResponse(
-            preview,
-            media_type="image/png",
-            headers={"Cache-Control": "no-store, max-age=0"},
-        )
-    # Fall back to Ultralytics batch mosaics if preview not ready yet.
-    runs = job_artifacts_dir(job_id) / "runs"
+    artifacts = job_artifacts_dir(job_id)
+    headers = {"Cache-Control": "no-store, max-age=0"}
+    if (kind or "").strip().lower() == "gt":
+        gt = artifacts / "previews" / "gt.png"
+        if gt.is_file():
+            return FileResponse(gt, media_type="image/png", headers=headers)
+        return _error(404, "NO_GT", "No ground-truth overlay for this job.")
+    preview = resolve_epoch_preview(artifacts, epoch)
+    if preview is not None and preview.is_file():
+        return FileResponse(preview, media_type="image/png", headers=headers)
     for name in ("train_batch0.jpg", "val_batch0_pred.jpg", "val_batch0_labels.jpg"):
-        matches = list(runs.rglob(name)) if runs.is_dir() else []
-        if matches:
-            return FileResponse(matches[0], media_type="image/jpeg")
+        match = find_plot(artifacts, name)
+        if match is not None:
+            return FileResponse(match, media_type="image/jpeg", headers=headers)
     return _error(404, "NO_PREVIEW", "No training preview yet — wait for the first epoch.")
+
+
+@router.get("/jobs/{job_id}/plots/{name}")
+def studio_job_plot(job_id: str, name: str):
+    from app.studio.train_monitor import find_plot
+
+    try:
+        get_job(job_id)
+    except StudioStoreError as exc:
+        return _store_error(exc)
+    path = find_plot(job_artifacts_dir(job_id), name)
+    if path is None or not path.is_file():
+        return _error(404, "NO_PLOT", "Plot not found for this job.")
+    media = "image/png" if path.suffix.lower() == ".png" else "image/jpeg"
+    return FileResponse(path, media_type=media, headers={"Cache-Control": "no-store, max-age=0"})
 
 
 @router.delete("/jobs/{job_id}")
@@ -505,13 +575,14 @@ def studio_validate_dataset(dataset_id: str, fold: str | None = None) -> dict:
 
 @router.post("/train")
 def studio_train(body: TrainBody, background: BackgroundTasks) -> dict:
-    from app.studio.dataset import assert_base_model
+    from app.studio.dataset import assert_base_model, effective_train_task
     from app.studio.train_job import run_local_training_job
 
     try:
         dataset = get_dataset(body.datasetId)
         labeled_pages_dir(body.datasetId)
-        base_model = assert_base_model(dataset["task"], body.baseModel)
+        train_task = effective_train_task(dataset, body.baseModel)
+        base_model = assert_base_model(train_task, body.baseModel)
     except StudioStoreError as exc:
         return _store_error(exc)
     except ValueError as exc:
@@ -520,7 +591,7 @@ def studio_train(body: TrainBody, background: BackgroundTasks) -> dict:
     job = create_job(
         {
             "dataset_id": dataset["id"],
-            "task": dataset["task"],
+            "task": train_task,
             "base_model": base_model,
             "epochs": body.epochs,
             "batch": body.batch,
@@ -536,12 +607,16 @@ def studio_train(body: TrainBody, background: BackgroundTasks) -> dict:
 def studio_base_models(task: str | None = None) -> dict:
     from app.studio.dataset import list_base_models
 
-    models = list_base_models(task if task in {"detect", "segment"} else None)
+    models = list_base_models(task if task in {"detect", "segment", "pose"} else None)
     from app.studio.model_catalog import CATEGORY_LABELS, DATASET_CATEGORY_DEFAULTS
 
     return {
         "models": models,
-        "default": {"detect": "yolov8n.pt", "segment": "yolov8n-seg.pt"},
+        "default": {
+            "detect": "yolo_room.pt",
+            "segment": "mitunet_walls.pth",
+            "pose": "yolo26n-pose.pt",
+        },
         "categories": [
             {
                 "id": key,

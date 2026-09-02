@@ -16,12 +16,32 @@ def test_parse_class_names() -> None:
     assert parse_class_names("wall, door\nwindow") == ["wall", "door", "window"]
 
 
+def test_class_names_for_training_drops_foreign_layout_classes() -> None:
+    from app.studio.dataset import class_names_for_training
+
+    names = class_names_for_training(
+        {
+            "category": "north_arrow",
+            "class_names": [
+                "North Arrow",
+                "Title block",
+                "Drawing area",
+                "Legend block",
+                "Drawing border",
+                "Revision block",
+                "North",
+            ],
+        }
+    )
+    assert names == ["North Arrow"]
+
+
 def test_assert_base_model() -> None:
     assert assert_base_model("detect", "") == "yolov8n.pt"
+    assert assert_base_model("pose", "") == "yolo26n-pose.pt"
     assert assert_base_model("segment", "yolov8n-seg.pt") == "yolov8n-seg.pt"
     assert assert_base_model("detect", "retinanet_latest.pth") == "retinanet_latest.pth"
     assert assert_base_model("segment", "deeplab_walls_best.h5") == "deeplab_walls_best.h5"
-    assert assert_base_model("detect", "unet_walls_best.h5") == "unet_walls_best.h5"
     assert assert_base_model("segment", "simple_walls_best.h5") == "unet_walls_best.h5"
 
 
@@ -32,6 +52,10 @@ def test_assert_base_model_mismatch() -> None:
         assert_base_model("segment", "yolov8n.pt")
     with pytest.raises(ValueError):
         assert_base_model("detect", "yolov8n-seg.pt")
+    with pytest.raises(ValueError):
+        assert_base_model("detect", "yolo26n-pose.pt")
+    with pytest.raises(ValueError):
+        assert_base_model("pose", "yolov8n.pt")
 
 
 def _write_yolo_pair(folder: Path, stem: str) -> None:

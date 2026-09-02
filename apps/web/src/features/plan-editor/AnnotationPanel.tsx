@@ -4,12 +4,18 @@ import { useMemo, useRef, useState } from "react";
 import { classSwatch } from "./styles";
 import { LABELME_CLASSES } from "./labelClasses";
 import { LAYOUT_LABELME_CLASSES } from "./layoutLabelClasses";
+import { HeadingHint } from "@/components/ui/HoverHint";
+import { CompassKeypointToggles } from "./CompassKeypointToggles";
 import { EntityInspector } from "./EntityInspector";
 import { useActiveOverlayPage, useOverlayStore } from "./useOverlayStore";
+import type { AnnotateSaveStatus } from "@/features/studio/studioLabelSave";
 
 interface AnnotationPanelProps {
   onImportFile: (file: File) => void;
   onExport: () => void;
+  onSave?: () => void;
+  saveStatus?: AnnotateSaveStatus;
+  saveError?: string | null;
   importError?: string | null;
   /** Show sheet layout classes (title block, drawing area, legend, …). */
   includeLayoutClasses?: boolean;
@@ -17,6 +23,7 @@ interface AnnotationPanelProps {
   extraClasses?: string[];
   onAddClass?: (name: string) => void | Promise<void>;
   addClassError?: string | null;
+  compassAnnotate?: boolean;
 }
 
 function LegendRows({
@@ -123,7 +130,7 @@ function AddClassForm({
           Add
         </button>
       </div>
-      {error ? <p className="text-[10px] text-red-600">{error}</p> : null}
+      {error ? <p className="text-xs text-red-600">{error}</p> : null}
     </div>
   );
 }
@@ -131,11 +138,15 @@ function AddClassForm({
 export function AnnotationPanel({
   onImportFile,
   onExport,
+  onSave,
+  saveStatus = "idle",
+  saveError,
   importError,
   includeLayoutClasses = false,
   extraClasses = [],
   onAddClass,
   addClassError,
+  compassAnnotate = false,
 }: AnnotationPanelProps) {
   const fileRef = useRef<HTMLInputElement>(null);
   const { entities, selectedIds } = useActiveOverlayPage();
@@ -187,19 +198,25 @@ export function AnnotationPanel({
 
   return (
     <div className="space-y-4">
-      <p className="text-[11px] leading-relaxed text-slate-500">
-        Pick a class from the legend, then draw. Labels save on this PC next to the page PNG.
-        Projects stay inference-only.
-      </p>
+      {compassAnnotate ? (
+        <div className="space-y-1.5">
+          <HeadingHint
+            title="Compass keypoints"
+            className="text-xs font-semibold uppercase tracking-wide text-slate-500"
+            hint="Draw the compass, then place tip and base (T / B). Drag a keypoint to move it. Wait for Saved or press Ctrl+S — tip and base live on the north-arrow JSON, not only on screen."
+          />
+          <CompassKeypointToggles compact />
+        </div>
+      ) : null}
 
       <div>
         {includeLayoutClasses ? (
           <>
-            <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Sheet layout</h3>
-            <p className="mt-0.5 text-[10px] leading-relaxed text-slate-500">
-              Draw a <span className="font-medium text-slate-600">Drawing area</span> rectangle so tile
-              generation crops to the floor plan (or rely on layout detect).
-            </p>
+            <HeadingHint
+              title="Sheet layout"
+              className="text-xs font-semibold uppercase tracking-wide text-slate-500"
+              hint="Draw a Drawing area rectangle so tile generation crops to the floor plan, or rely on layout detect."
+            />
             <ul className="mt-1 max-h-40 overflow-y-auto rounded border border-slate-200">
               <LegendRows
                 classes={LAYOUT_LABELME_CLASSES}
@@ -210,9 +227,11 @@ export function AnnotationPanel({
                 toggleLabelVisibility={toggleLabelVisibility}
               />
             </ul>
-            <h3 className="mt-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
-              Rooms &amp; elements
-            </h3>
+            <HeadingHint
+              title="Rooms & elements"
+              className="mt-3 text-xs font-semibold uppercase tracking-wide text-slate-500"
+              hint="Pick a class from the legend, then draw. Labels save on this PC next to the page PNG."
+            />
             <ul className="mt-1 max-h-56 overflow-y-auto rounded border border-slate-200">
               <LegendRows
                 classes={roomClasses}
@@ -227,7 +246,11 @@ export function AnnotationPanel({
           </>
         ) : (
           <>
-            <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Legend</h3>
+            <HeadingHint
+              title="Legend"
+              className="text-xs font-semibold uppercase tracking-wide text-slate-500"
+              hint="Pick a class from the legend, then draw. Labels save on this PC next to the page PNG."
+            />
             <ul className="mt-1 max-h-56 overflow-y-auto rounded border border-slate-200">
               <LegendRows
                 classes={roomClasses}
@@ -244,6 +267,43 @@ export function AnnotationPanel({
       </div>
 
       <div className="flex flex-col gap-2">
+        {onSave ? (
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              className="flex-1 rounded bg-brand-700 px-2 py-1.5 text-xs font-medium text-white hover:bg-brand-800 disabled:opacity-50"
+              disabled={saveStatus === "saving" || saveStatus === "saved" || saveStatus === "idle"}
+              onClick={onSave}
+            >
+              {saveStatus === "saving"
+                ? "Saving…"
+                : saveStatus === "saved"
+                  ? "Saved"
+                  : saveStatus === "error"
+                    ? "Retry save"
+                    : "Save labels"}
+            </button>
+            <span
+              className={
+                saveStatus === "error"
+                  ? "text-xs text-red-600"
+                  : saveStatus === "unsaved"
+                    ? "text-xs text-amber-700"
+                    : "text-xs text-slate-500"
+              }
+            >
+              {saveStatus === "unsaved"
+                ? "Unsaved"
+                : saveStatus === "saving"
+                  ? "Writing JSON…"
+                  : saveStatus === "saved"
+                    ? "On this PC"
+                    : saveStatus === "error"
+                      ? saveError || "Save failed"
+                      : "Ctrl+S"}
+            </span>
+          </div>
+        ) : null}
         <div className="flex gap-2">
           <input
             ref={fileRef}
@@ -290,16 +350,16 @@ export function AnnotationPanel({
           </button>
         ) : null}
       </div>
-      {importError ? <p className="text-[11px] text-red-600">{importError}</p> : null}
+      {importError ? <p className="text-[13px] text-red-600">{importError}</p> : null}
 
       <div>
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-          Shapes ({shapes.length})
-        </h3>
+        <HeadingHint
+          title={`Shapes (${shapes.length})`}
+          className="text-xs font-semibold uppercase tracking-wide text-slate-500"
+          hint="Import a LabelMe file or start drawing. Click a shape to select it."
+        />
         {shapes.length === 0 ? (
-          <p className="mt-1 text-[11px] leading-relaxed text-slate-500">
-            No shapes on this page. Import a LabelMe file or start drawing.
-          </p>
+          <p className="mt-1 text-[13px] text-slate-400">No shapes on this page</p>
         ) : (
           <ul className="mt-1 max-h-44 overflow-y-auto rounded border border-slate-200">
             {shapes.map((shape) => {
@@ -323,11 +383,11 @@ export function AnnotationPanel({
                       {shape.n}. {shape.label}
                     </span>
                     {shape.source !== "model" ? (
-                      <span className="text-[10px] uppercase tracking-wide text-slate-400">
+                      <span className="text-xs uppercase tracking-wide text-slate-400">
                         {shape.source === "labelme" ? "json" : "draw"}
                       </span>
                     ) : (
-                      <span className="text-[10px] uppercase tracking-wide text-slate-400">detect</span>
+                      <span className="text-xs uppercase tracking-wide text-slate-400">detect</span>
                     )}
                   </button>
                 </li>

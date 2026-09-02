@@ -4,12 +4,42 @@
 
 :root {
   color-scheme: light;
-  --hl-ink: #0f1c17;
-  --hl-paper: #f3f6f2;
-  --hl-moss: #1f6b4a;
-  --hl-moss-deep: #134833;
-  --hl-mist: #d7e4db;
-  --hl-line: #c5d4cb;
+  --hl-ink: #18181b;
+  --hl-paper: #fafafa;
+  --hl-workbench: #f4f4f5;
+  --hl-panel: #ffffff;
+  --hl-raised: #ffffff;
+  --hl-chrome: #f4f4f5;
+  --hl-moss: #3f3f46;
+  --hl-moss-deep: #27272a;
+  --hl-mist: #f0f0f1;
+  --hl-line: #e4e4e7;
+  --hl-stroke: #d4d4d8;
+  --hl-accent: #3f3f46;
+  --hl-radius: 4px;
+  --hl-radius-sm: 3px;
+  --hl-gap: 4px;
+  --hl-shadow: none;
+}
+
+html.dark {
+  color-scheme: dark;
+  /* Soft charcoal + sage — low glare, aligned with brand greens */
+  --hl-ink: #c8d0d9;
+  --hl-paper: #1a1f26;
+  --hl-workbench: #1e242c;
+  --hl-panel: #252b34;
+  --hl-raised: #2d343e;
+  --hl-chrome: #171b21;
+  --hl-moss: #7eb89a;
+  --hl-moss-deep: #6aa687;
+  --hl-mist: #323943;
+  --hl-line: #353c47;
+  --hl-stroke: #3e4652;
+  --hl-accent: #7eb89a;
+  --hl-selected: color-mix(in srgb, var(--hl-moss) 16%, var(--hl-panel));
+  --hl-selected-ink: #b8dcc8;
+  --hl-shadow: 0 1px 2px rgb(0 0 0 / 0.22);
 }
 
 html {
@@ -17,24 +47,122 @@ html {
 }
 
 body {
-  @apply min-h-full bg-[var(--hl-paper)] text-[var(--hl-ink)];
+  @apply min-h-full bg-[var(--hl-paper)] text-[var(--hl-ink)] text-sm leading-normal;
 }
 
 @layer components {
+  .hl-workbench {
+    background: var(--hl-workbench);
+  }
+
+  .hl-island {
+    border: 1px solid var(--hl-stroke);
+    border-radius: var(--hl-radius);
+    background: var(--hl-panel);
+  }
+
+  .hl-block {
+    border: 1px solid var(--hl-stroke);
+    border-radius: var(--hl-radius);
+    background: var(--hl-panel);
+  }
+
+  .hl-menu-island {
+    background: var(--hl-chrome);
+  }
+
+  .hl-chrome {
+    background: var(--hl-chrome);
+  }
+
+  .hl-activity-bar {
+    width: 44px;
+    min-width: 44px;
+    background: var(--hl-chrome);
+  }
+
+  .hl-group {
+    border: 1px solid var(--hl-stroke);
+    border-radius: var(--hl-radius);
+    background: var(--hl-panel);
+  }
+
+  /* Shared horizontal layout for body + footer so hl-group columns align */
+  .hl-workbench-columns {
+    display: flex;
+    min-width: 0;
+    gap: var(--hl-gap);
+    padding: 0 var(--hl-gap) var(--hl-gap);
+  }
+
+  .hl-workbench-body {
+    min-height: 0;
+    flex: 1;
+    overflow: hidden;
+  }
+
+  .hl-panel-stack {
+    display: flex;
+    min-height: 0;
+    flex-direction: column;
+    gap: var(--hl-gap);
+  }
+
+  .hl-panel-row {
+    display: flex;
+    min-height: 0;
+    min-width: 0;
+    gap: var(--hl-gap);
+  }
+
   .btn-primary {
-    @apply inline-flex items-center justify-center rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50;
+    @apply inline-flex items-center justify-center rounded bg-brand-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50;
   }
 
   .btn-secondary {
-    @apply inline-flex items-center justify-center rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2;
+    @apply inline-flex items-center justify-center rounded border border-[var(--hl-stroke)] bg-[var(--hl-panel)] px-4 py-2 text-sm font-medium text-[var(--hl-ink)] transition hover:bg-[var(--hl-raised)] focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2;
+  }
+
+  .btn-compact {
+    @apply inline-flex h-8 shrink-0 items-center justify-center px-2.5 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .btn-compact-primary {
+    @apply btn-compact rounded bg-[var(--hl-moss)] text-white hover:bg-[var(--hl-moss-deep)];
+  }
+
+  .btn-compact-secondary {
+    @apply btn-compact rounded border border-[var(--hl-stroke)] bg-[var(--hl-panel)] text-[var(--hl-ink)] hover:bg-[var(--hl-raised)];
+  }
+
+  .btn-segment-group {
+    @apply inline-flex overflow-hidden rounded border border-[var(--hl-stroke)] bg-[var(--hl-panel)];
+  }
+
+  .btn-segment {
+    @apply btn-compact border-r border-[var(--hl-stroke)] text-[var(--hl-ink)] last:border-r-0 hover:bg-[var(--hl-raised)];
   }
 
   .card {
-    @apply rounded-xl border border-slate-200 bg-white p-6 shadow-sm;
+    @apply rounded border border-[var(--hl-stroke)] bg-[var(--hl-panel)] p-6;
   }
 
   .badge {
-    @apply inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium;
+    @apply inline-flex items-center rounded px-2 py-0.5 text-xs font-medium;
+  }
+
+  .hl-input {
+    @apply w-full rounded border border-[var(--hl-stroke)] bg-[var(--hl-panel)] px-3 py-2 text-sm text-[var(--hl-ink)] focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500;
+  }
+
+  .hl-label {
+    @apply mb-1 block text-xs font-semibold;
+    color: color-mix(in srgb, var(--hl-ink) 70%, transparent);
+  }
+
+  .hl-caption {
+    @apply text-xs leading-snug;
+    color: color-mix(in srgb, var(--hl-ink) 60%, transparent);
   }
 
   .font-display {
@@ -76,4 +204,131 @@ body {
   to {
     transform: scale(1.12) translate3d(-1.5%, -1%, 0);
   }
+}
+
+html.dark .bg-white,
+html.dark .bg-white\/70,
+html.dark .bg-white\/92,
+html.dark .bg-white\/95 {
+  background-color: var(--hl-panel);
+}
+
+html.dark .bg-slate-50,
+html.dark .hover\:bg-slate-50:hover,
+html.dark .bg-slate-50\/80 {
+  background-color: var(--hl-raised);
+}
+
+html.dark .bg-slate-200 {
+  background-color: var(--hl-mist);
+}
+
+html.dark .bg-slate-100,
+html.dark .hover\:bg-slate-100:hover {
+  background-color: var(--hl-mist);
+}
+
+html.dark .border-slate-200,
+html.dark .border-slate-300,
+html.dark .divide-slate-100 > :not([hidden]) ~ :not([hidden]),
+html.dark .divide-slate-200 > :not([hidden]) ~ :not([hidden]) {
+  border-color: var(--hl-stroke);
+}
+
+html.dark .text-slate-900,
+html.dark .text-slate-800,
+html.dark .text-slate-700 {
+  color: var(--hl-ink);
+}
+
+html.dark .text-slate-600,
+html.dark .text-slate-500 {
+  color: color-mix(in srgb, var(--hl-ink) 74%, transparent);
+}
+
+html.dark .text-slate-400,
+html.dark .text-slate-300 {
+  color: color-mix(in srgb, var(--hl-ink) 54%, transparent);
+}
+
+html.dark .bg-brand-50,
+html.dark .bg-brand-50\/80,
+html.dark .bg-brand-50\/40,
+html.dark .hover\:bg-brand-50:hover,
+html.dark .hover\:bg-brand-50\/40:hover {
+  background-color: var(--hl-selected);
+}
+
+html.dark .hover\:bg-brand-100:hover {
+  background-color: color-mix(in srgb, var(--hl-moss) 20%, var(--hl-raised));
+}
+
+html.dark .text-brand-600,
+html.dark .text-brand-700,
+html.dark .text-brand-800,
+html.dark .text-brand-900,
+html.dark .hover\:text-brand-600:hover,
+html.dark .hover\:text-brand-700:hover,
+html.dark .hover\:text-brand-800:hover,
+html.dark .hover\:text-brand-900:hover {
+  color: var(--hl-selected-ink);
+}
+
+html.dark .text-brand-100 {
+  color: #d8ebe1;
+}
+
+html.dark .border-brand-300,
+html.dark .border-brand-400,
+html.dark .border-brand-500,
+html.dark .hover\:border-brand-400:hover,
+html.dark .hover\:border-brand-500:hover {
+  border-color: color-mix(in srgb, var(--hl-moss) 42%, var(--hl-stroke));
+}
+
+html.dark .ring-brand-400\/50,
+html.dark .ring-brand-400\/40 {
+  --tw-ring-color: color-mix(in srgb, var(--hl-moss) 38%, transparent);
+}
+
+html.dark .bg-brand-600,
+html.dark .bg-brand-700 {
+  background-color: #4a8568;
+}
+
+html.dark .hover\:bg-brand-700:hover,
+html.dark .hover\:bg-brand-800:hover {
+  background-color: #568f72;
+}
+
+html.dark .bg-brand-800\/85 {
+  background-color: color-mix(in srgb, #355947 88%, transparent);
+}
+
+html.dark .active\:bg-brand-300\/40:active {
+  background-color: color-mix(in srgb, var(--hl-moss) 28%, transparent);
+}
+
+html.dark .hover\:bg-white:hover,
+html.dark .hover\:bg-white\/70:hover {
+  background-color: var(--hl-raised);
+}
+
+html.dark .text-red-600,
+html.dark .text-red-700 {
+  color: #e89292;
+}
+
+html.dark .hover\:bg-red-50:hover {
+  background-color: color-mix(in srgb, #e89292 12%, var(--hl-raised));
+}
+
+html.dark .accent-slate-900 {
+  accent-color: var(--hl-moss);
+}
+
+html.dark .shadow-sm,
+html.dark .shadow-lg,
+html.dark .shadow-2xl {
+  box-shadow: var(--hl-shadow);
 }

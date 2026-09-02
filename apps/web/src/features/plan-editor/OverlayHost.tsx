@@ -1,12 +1,16 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState, type MouseEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import type { Point } from "@highlife/shared-types";
+import {
+  openAppContextMenu,
+} from "@/components/shell/AppContextMenu";
 import { clientToImagePixels } from "@/features/plan-viewer/imageCoords";
-import { Circle } from "react-konva";
-import { OverlayKonvaStage, OverlayShapes } from "./OverlayShapes";
-import { hitTestEntities } from "./geometry";
+import { OverlayShapes, OverlaySvgLayer } from "./OverlayShapes";
+import { hitTestCompassKeypoint, isNorthArrowEntity } from "./compassKeypointAnnotate";
+import { entitiesInRect, hitTestEntities, normalizeRect } from "./geometry";
 import { isLayoutRegionType } from "./layoutRegionClasses";
+import { labelIsHidden, overlayGroupFor } from "./overlayVisibility";
 import {
   applyResizeHandle,
   cursorForResizeHandle,
@@ -17,8 +21,16 @@ import {
   type ResizeHandle,
 } from "./layoutRegionGeometry";
 import { useActiveOverlayPage, useOverlayStore } from "./useOverlayStore";
+import { classifyWallEntities } from "@/lib/geometry/classifyWallEntities";
+import { useWallClassificationStore } from "./useWallClassificationStore";
+import { classifyMainDoorsByWidth } from "@/lib/hierarchy/communalMainDoor";
+import { doorLikesFromEntities } from "@/lib/hierarchy/doorLikesFromEntities";
+import {
+  useMainDoorDetectionStore,
+} from "./useMainDoorDetectionStore";
 import { makeLabeledEntity } from "./labelClasses";
 import type { OverlayTool } from "./types";
+import { useGeometryExtractStore } from "@/features/analyses/useGeometryExtractStore";
 
 interface OverlayHostProps {
   imageWidth: number;
@@ -41,8 +53,9 @@ interface OverlayHostProps {
   activeOcrTile?: { x: number; y: number; width: number; height: number } | null;
   /** When true, select/move/resize detected and manual layout regions. */
   layoutEditMode?: boolean;
-  onBackgroundPanStart?: (clientX: number, clientY: number) => void;
   onPanBy?: (dx: number, dy: number) => void;
+  /** Page scale — used to classify walls by thickness for overlay colors. */
+  pixelsPerMeter?: number | null;
   /** Screen coords — e.g. magnifier loupe while annotating. */
   onPointerMove?: (clientX: number, clientY: number) => void;
 }
@@ -55,24 +68,26 @@ export function OverlayHost({
   imageWidth,
   imageHeight,
   displayWidth,
-  displayHeight,
-  zoom,
   passThrough,
   overlayMode = "detections",
   activeTile = null,
   ocrRegion = null,
   activeOcrTile = null,
   layoutEditMode = false,
-  onBackgroundPanStart,
   onPanBy,
+  pixelsPerMeter = null,
   onPointerMove,
 }: OverlayHostProps) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const panDrag = useRef<{ x: number; y: number } | null>(null);
+  const [panning, setPanning] = useState(false);
   const [hoverResizeHandle, setHoverResizeHandle] = useState<ResizeHandle | null>(null);
+  const [hoverKeypoint, setHoverKeypoint] = useState(false);
   const { entities, selectedIds } = useActiveOverlayPage();
   const tool = useOverlayStore((s) => s.tool);
   const layers = useOverlayStore((s) => s.layers);
+  const groupVisible = useOverlayStore((s) => s.groupVisible);
+  const compassKeypointVisible = useOverlayStore((s) => s.compassKeypointVisible);
   const hiddenLabels = useOverlayStore((s) => s.hiddenLabels);
   const draft = useOverlayStore((s) => s.draft);
   const layoutDrawType = useOverlayStore((s) => s.layoutDrawType);
@@ -80,6 +95,7 @@ export function OverlayHost({
   const hoverId = useOverlayStore((s) => s.hoverId);
   const setHoverId = useOverlayStore((s) => s.setHoverId);
   const select = useOverlayStore((s) => s.select);
+  const toggleSelect = useOverlayStore((s) => s.toggleSelect);
   const clearSelection = useOverlayStore((s) => s.clearSelection);
   const setDraft = useOverlayStore((s) => s.setDraft);
   const commitDraft = useOverlayStore((s) => s.commitDraft);
@@ -87,30 +103,74 @@ export function OverlayHost({
   const setEntityGeometry = useOverlayStore((s) => s.setEntityGeometry);
   const finishMove = useOverlayStore((s) => s.finishMove);
   const finishResize = useOverlayStore((s) => s.finishResize);
+  const compassPlace = useOverlayStore((s) => s.compassPlace);
+  const placeCompassKeypoint = useOverlayStore((s) => s.placeCompassKeypoint);
+  const moveCompassKeypointTo = useOverlayStore((s) => s.moveCompassKeypointTo);
+  const finishKeypointMove = useOverlayStore((s) => s.finishKeypointMove);
+  const geometryEntities = useGeometryExtractStore((s) => s.overlayEntities);
+  const showGeometryOverlays = useGeometryExtractStore((s) => s.showOverlays);
+  const geometrySelectedId = useGeometryExtractStore((s) => s.selectedId);
+
+  const colorByThickness = useWallClassificationStore((s) => s.colorByThickness);
+  const externalMinMm = useWallClassificationStore((s) => s.externalMinMm);
+  const externalMinPx = useWallClassificationStore((s) => s.externalMinPx);
+  const wallClassMode = useWallClassificationStore((s) => s.mode);
+  const highlightMainDoors = useMainDoorDetectionStore((s) => s.highlightOnDrawing);
+  const mainDoorMode = useMainDoorDetectionStore((s) => s.mode);
+  const mainDoorMinSpanPx = useMainDoorDetectionStore((s) => s.minSpanPx);
 
   const scale = displayWidth / Math.max(imageWidth, 1);
-  const tolerance = 8 / Math.max(scale * zoom, 0.05);
-  const screenPx = (px: number) => px / Math.max(scale * zoom, 0.04);
+  const screenScale = Math.max(scale, 0.04);
+  const tolerance = 8 / screenScale;
+  const screenPx = (px: number) => px / screenScale;
 
   const visible = useMemo(() => {
     return entities.filter((e) => {
-      if (overlayMode === "detections" && e.source !== "model") {
-        if (!(e.source === "manual" && isLayoutRegionType(e.type))) return false;
+      if (overlayMode === "detections") {
+        const keep =
+          e.source === "model" ||
+          e.source === "inferred" ||
+          (e.source === "manual" && (isLayoutRegionType(e.type) || isNorthArrowEntity(e)));
+        if (!keep) return false;
       }
+      if (showGeometryOverlays && e.type === "room") return false;
       const layer = layers[e.layer];
       if (!layer?.visible) return false;
       if (e.status === "rejected" && !layer.showRejected) return false;
-      if (hiddenLabels[e.label]) return false;
+      if (labelIsHidden(hiddenLabels, e.label)) return false;
+      const group = overlayGroupFor(e);
+      if (!groupVisible[group]) return false;
       return true;
     });
-  }, [entities, layers, hiddenLabels, overlayMode]);
+  }, [entities, layers, hiddenLabels, overlayMode, groupVisible, layoutEditMode, showGeometryOverlays]);
 
   const displayEntities = useMemo(() => {
-    if (overlayMode === "annotate") return entities;
-    return entities.filter(
-      (e) => e.source === "model" || (e.source === "manual" && isLayoutRegionType(e.type)),
-    );
-  }, [entities, overlayMode]);
+    const live =
+      overlayMode === "annotate"
+        ? entities
+        : entities.filter(
+            (e) =>
+              e.source === "model" ||
+              e.source === "inferred" ||
+              (e.source === "manual" && (isLayoutRegionType(e.type) || isNorthArrowEntity(e))),
+          );
+    if (!showGeometryOverlays) return live;
+    return live.filter((e) => e.type !== "room");
+  }, [entities, overlayMode, showGeometryOverlays]);
+
+  const wallClassById = useMemo(() => {
+    if (!colorByThickness) return undefined;
+    const walls = classifyWallEntities(entities, pixelsPerMeter, externalMinMm, wallClassMode, externalMinPx);
+    if (!walls.length) return undefined;
+    return new Map(walls.map((w) => [w.id, w.classification]));
+  }, [colorByThickness, entities, pixelsPerMeter, externalMinMm, externalMinPx, wallClassMode]);
+
+  const mainDoorIds = useMemo(() => {
+    if (!highlightMainDoors) return undefined;
+    const doors = doorLikesFromEntities(entities);
+    if (!doors.length) return undefined;
+    return classifyMainDoorsByWidth(doors, { mode: mainDoorMode, minSpanPx: mainDoorMinSpanPx });
+  }, [entities, highlightMainDoors, mainDoorMode, mainDoorMinSpanPx]);
 
   const layoutEntities = useMemo(
     () => visible.filter((e) => isLayoutRegionType(e.type) && e.status !== "rejected"),
@@ -141,92 +201,169 @@ export function OverlayHost({
     [imageWidth, imageHeight],
   );
 
+  const beginSelectAt = useCallback(
+    (e: MouseEvent, pt: Point) => {
+      const keypointHit = hitTestCompassKeypoint(pt, selectableEntities, tolerance, selectedIds);
+      if (keypointHit) {
+        e.stopPropagation();
+        const original = entities.find((ent) => ent.id === keypointHit.entityId);
+        if (original) {
+          select([keypointHit.entityId], false);
+          setDraft({
+            tool: "move-keypoint",
+            entityId: keypointHit.entityId,
+            name: keypointHit.name,
+            last: pt,
+            original,
+          });
+        }
+        return;
+      }
+      if (
+        layoutEditMode &&
+        selectedLayoutEntity &&
+        selectedLayoutRect &&
+        selectedIds.length === 1
+      ) {
+        const handle = hitResizeHandle(pt, selectedLayoutRect, tolerance * 1.25);
+        if (handle) {
+          e.stopPropagation();
+          setDraft({
+            tool: "resize",
+            entityId: selectedLayoutEntity.id,
+            handle,
+            startRect: selectedLayoutRect,
+            original: selectedLayoutEntity,
+          });
+          return;
+        }
+      }
+
+      const additive = e.shiftKey;
+      const toggling = e.ctrlKey || e.metaKey;
+      const hit = hitTestEntities(pt, selectableEntities, tolerance);
+      const startMoveOnHit = Boolean(hit) && selectedIds.includes(hit!.id) && !toggling;
+
+      if (startMoveOnHit && hit) {
+        e.stopPropagation();
+        const nextIds = additive
+          ? selectedIds.includes(hit.id)
+            ? selectedIds
+            : [...selectedIds, hit.id]
+          : selectedIds.includes(hit.id)
+            ? selectedIds
+            : [hit.id];
+        select(nextIds, false);
+        const originals = entities
+          .filter((ent) => nextIds.includes(ent.id))
+          .map((ent) => (isLayoutRegionType(ent.type) ? layoutEntityToRect(ent) : ent));
+        setDraft({ tool: "move", ids: nextIds, origin: pt, last: pt, originals });
+        return;
+      }
+
+      if (hit && toggling) {
+        e.stopPropagation();
+        toggleSelect(hit.id);
+        return;
+      }
+
+      if (hit) {
+        e.stopPropagation();
+        const nextIds = additive
+          ? selectedIds.includes(hit.id)
+            ? selectedIds
+            : [...selectedIds, hit.id]
+          : [hit.id];
+        select(nextIds, false);
+        return;
+      }
+
+      e.stopPropagation();
+      setDraft({ tool: "marquee", start: pt, current: pt, additive });
+    },
+    [
+      selectableEntities,
+      tolerance,
+      selectedIds,
+      entities,
+      layoutEditMode,
+      selectedLayoutEntity,
+      selectedLayoutRect,
+      select,
+      setDraft,
+      toggleSelect,
+    ],
+  );
+
   const onMouseDown = useCallback(
     (e: MouseEvent) => {
-      if (passThrough || e.button !== 0) return;
+      if (passThrough) return;
+
+      if (e.button === 1) {
+        e.preventDefault();
+        e.stopPropagation();
+        panDrag.current = { x: e.clientX, y: e.clientY };
+        setPanning(true);
+        return;
+      }
+
+      if (e.button !== 0) return;
+
       const pt = toImage(e.clientX, e.clientY);
       if (!pt) return;
 
-      if (tool === "pan" || (overlayMode !== "annotate" && isDrawTool(tool) && !layoutDrawing)) {
-        onBackgroundPanStart?.(e.clientX, e.clientY);
+      if (compassPlace) {
+        e.stopPropagation();
+        placeCompassKeypoint(pt);
         return;
       }
 
-      if (tool === "point") {
-        e.stopPropagation();
-        const store = useOverlayStore.getState();
-        store.execute({
-          type: "add",
-          entity: makeLabeledEntity(store.labelClass, { kind: "point", x: pt.x, y: pt.y }),
-        });
-        return;
-      }
-
-      if (tool === "rect") {
-        e.stopPropagation();
-        setDraft({ tool: "rect", start: pt, current: pt });
-        return;
-      }
-
-      if (tool === "polyline" || tool === "polygon" || tool === "mask") {
-        e.stopPropagation();
-        const current = draft && (draft.tool === "polyline" || draft.tool === "polygon" || draft.tool === "mask") ? draft : null;
-        if (current) {
-          const nearStart =
-            current.points[0] &&
-            Math.hypot(pt.x - current.points[0].x, pt.y - current.points[0].y) < tolerance * 1.5;
-          if ((tool === "polygon" || tool === "mask") && current.points.length >= 3 && nearStart) {
-            commitDraft();
+      const drawing = (overlayMode === "annotate" && isDrawTool(tool)) || layoutDrawing;
+      if (drawing) {
+        if (tool === "point") {
+          e.stopPropagation();
+          const store = useOverlayStore.getState();
+          if (store.compassPlace) {
+            store.placeCompassKeypoint(pt);
             return;
           }
-          setDraft({ tool, points: [...current.points, pt], current: pt });
-        } else {
-          setDraft({ tool, points: [pt], current: pt });
+          store.execute({
+            type: "add",
+            entity: makeLabeledEntity(store.labelClass, { kind: "point", x: pt.x, y: pt.y }),
+          });
+          return;
         }
-        return;
-      }
 
-      if (tool === "select") {
-        if (
-          layoutEditMode &&
-          selectedLayoutEntity &&
-          selectedLayoutRect &&
-          selectedIds.length === 1
-        ) {
-          const handle = hitResizeHandle(pt, selectedLayoutRect, tolerance * 1.25);
-          if (handle) {
-            e.stopPropagation();
-            setDraft({
-              tool: "resize",
-              entityId: selectedLayoutEntity.id,
-              handle,
-              startRect: selectedLayoutRect,
-              original: selectedLayoutEntity,
-            });
-            return;
+        if (tool === "rect") {
+          e.stopPropagation();
+          setDraft({ tool: "rect", start: pt, current: pt });
+          return;
+        }
+
+        if (tool === "polyline" || tool === "polygon" || tool === "mask") {
+          e.stopPropagation();
+          const current =
+            draft && (draft.tool === "polyline" || draft.tool === "polygon" || draft.tool === "mask")
+              ? draft
+              : null;
+          if (current) {
+            const nearStart =
+              current.points[0] &&
+              Math.hypot(pt.x - current.points[0].x, pt.y - current.points[0].y) < tolerance * 1.5;
+            if ((tool === "polygon" || tool === "mask") && current.points.length >= 3 && nearStart) {
+              commitDraft();
+              return;
+            }
+            setDraft({ tool, points: [...current.points, pt], current: pt });
+          } else {
+            setDraft({ tool, points: [pt], current: pt });
           }
-        }
-
-        const hit = hitTestEntities(pt, selectableEntities, tolerance);
-        if (hit) {
-          e.stopPropagation();
-          const additive = e.shiftKey;
-          const nextIds = additive
-            ? selectedIds.includes(hit.id)
-              ? selectedIds
-              : [...selectedIds, hit.id]
-            : [hit.id];
-          select(nextIds, false);
-          const originals = entities
-            .filter((ent) => nextIds.includes(ent.id))
-            .map((ent) => (isLayoutRegionType(ent.type) ? layoutEntityToRect(ent) : ent));
-          setDraft({ tool: "move", ids: nextIds, origin: pt, last: pt, originals });
-        } else {
-          e.stopPropagation();
-          clearSelection();
-          panDrag.current = { x: e.clientX, y: e.clientY };
+          return;
         }
       }
+
+      e.stopPropagation();
+      beginSelectAt(e, pt);
     },
     [
       passThrough,
@@ -234,20 +371,13 @@ export function OverlayHost({
       tool,
       draft,
       tolerance,
-      visible,
-      selectableEntities,
-      selectedIds,
-      entities,
       overlayMode,
+      compassPlace,
+      placeCompassKeypoint,
       layoutDrawing,
-      layoutEditMode,
-      selectedLayoutEntity,
-      selectedLayoutRect,
-      onBackgroundPanStart,
+      beginSelectAt,
       setDraft,
       commitDraft,
-      select,
-      clearSelection,
     ],
   );
 
@@ -255,6 +385,7 @@ export function OverlayHost({
     (e: MouseEvent) => {
       onPointerMove?.(e.clientX, e.clientY);
       if (passThrough) return;
+
       if (panDrag.current && onPanBy) {
         e.stopPropagation();
         const dx = e.clientX - panDrag.current.x;
@@ -270,7 +401,7 @@ export function OverlayHost({
       }
 
       const current = useOverlayStore.getState().draft;
-      if (current?.tool === "rect") {
+      if (current?.tool === "rect" || current?.tool === "marquee") {
         setDraft({ ...current, current: pt });
         return;
       }
@@ -298,8 +429,15 @@ export function OverlayHost({
         });
         return;
       }
+      if (current?.tool === "move-keypoint") {
+        moveCompassKeypointTo(current.entityId, current.name, pt.x, pt.y);
+        setDraft({ ...current, last: pt });
+        return;
+      }
 
-      if (tool === "select") {
+      if (tool === "select" || tool === "marquee" || tool === "pan") {
+        const keypointHit = hitTestCompassKeypoint(pt, selectableEntities, tolerance, selectedIds);
+        setHoverKeypoint(Boolean(keypointHit));
         if (layoutEditMode && selectedLayoutRect && selectedIds.length === 1) {
           const handle = hitResizeHandle(pt, selectedLayoutRect, tolerance * 1.25);
           setHoverResizeHandle(handle);
@@ -318,6 +456,7 @@ export function OverlayHost({
       setDraft,
       moveSelectedBy,
       setEntityGeometry,
+      moveCompassKeypointTo,
       tool,
       selectableEntities,
       tolerance,
@@ -326,22 +465,62 @@ export function OverlayHost({
       layoutEditMode,
       selectedLayoutRect,
       selectedIds,
+      overlayMode,
     ],
   );
 
-  const onMouseUp = useCallback(() => {
+  const finishPan = useCallback(() => {
+    if (!panDrag.current) return;
     panDrag.current = null;
-    const current = useOverlayStore.getState().draft;
-    if (current?.tool === "rect") {
-      commitDraft();
-    }
-    if (current?.tool === "move") {
-      finishMove();
-    }
-    if (current?.tool === "resize") {
-      finishResize();
-    }
-  }, [commitDraft, finishMove, finishResize]);
+    setPanning(false);
+  }, []);
+
+  const onMouseUp = useCallback(
+    (e: MouseEvent) => {
+      finishPan();
+      const current = useOverlayStore.getState().draft;
+      if (current?.tool === "rect") {
+        commitDraft();
+      }
+      if (current?.tool === "marquee") {
+        const box = normalizeRect(current.start.x, current.start.y, current.current.x, current.current.y);
+        const dragged = box.width > Math.max(4, tolerance) || box.height > Math.max(4, tolerance);
+        if (dragged) {
+          const ids = entitiesInRect(selectableEntities, box).map((ent) => ent.id);
+          select(ids, current.additive);
+        } else if (!current.additive) {
+          clearSelection();
+        }
+        setDraft(null);
+      }
+      if (current?.tool === "move") {
+        finishMove();
+      }
+      if (current?.tool === "resize") {
+        finishResize();
+      }
+      if (current?.tool === "move-keypoint") {
+        finishKeypointMove();
+      }
+    },
+    [
+      finishPan,
+      commitDraft,
+      finishMove,
+      finishResize,
+      finishKeypointMove,
+      selectableEntities,
+      tolerance,
+      select,
+      clearSelection,
+      setDraft,
+    ],
+  );
+
+  useEffect(() => {
+    window.addEventListener("mouseup", finishPan);
+    return () => window.removeEventListener("mouseup", finishPan);
+  }, [finishPan]);
 
   const onDoubleClick = useCallback(() => {
     const current = useOverlayStore.getState().draft;
@@ -355,7 +534,7 @@ export function OverlayHost({
       ? [...draft.points, ...(draft.current ? [draft.current] : [])]
       : undefined;
   const draftRect =
-    draft?.tool === "rect"
+    draft?.tool === "rect" || draft?.tool === "marquee"
       ? {
           x: Math.min(draft.start.x, draft.current.x),
           y: Math.min(draft.start.y, draft.current.y),
@@ -364,74 +543,97 @@ export function OverlayHost({
         }
       : null;
 
-  const layoutEditing = layoutEditMode && tool === "select";
-  const capture =
-    !passThrough &&
-    (overlayMode === "annotate" ? tool !== "pan" : tool === "select" || layoutDrawing);
+  const layoutEditing = layoutEditMode && (tool === "select" || tool === "marquee");
+  const shapesGroupVisible = groupVisible;
+  const capture = !passThrough;
 
   const activeCursor =
-    draft?.tool === "resize"
-      ? cursorForResizeHandle(draft.handle)
-      : hoverResizeHandle
-        ? cursorForResizeHandle(hoverResizeHandle)
-        : cursorFor(tool, capture, layoutEditing);
+    panning
+      ? "grabbing"
+      : draft?.tool === "resize"
+        ? cursorForResizeHandle(draft.handle)
+        : hoverResizeHandle
+          ? cursorForResizeHandle(hoverResizeHandle)
+          : hoverKeypoint
+            ? "grab"
+            : compassPlace
+              ? "crosshair"
+              : cursorFor(tool, capture, isDrawTool(tool) || layoutDrawing);
 
   const handleSize = screenPx(7);
 
   return (
     <div
       ref={wrapRef}
+      data-hl-canvas
       className="absolute inset-0"
       style={{ pointerEvents: capture ? "auto" : "none", cursor: activeCursor }}
       onMouseDown={onMouseDown}
       onMouseMove={onMouseMove}
       onMouseUp={onMouseUp}
       onDoubleClick={onDoubleClick}
+      onContextMenu={(e) => {
+        if (passThrough) return;
+        e.preventDefault();
+        openAppContextMenu(e.clientX, e.clientY);
+      }}
     >
-      <OverlayKonvaStage
-        width={displayWidth}
-        height={displayHeight}
-        imageWidth={imageWidth}
-        imageHeight={imageHeight}
-        zoom={zoom}
-      >
+      <OverlaySvgLayer imageWidth={imageWidth} imageHeight={imageHeight}>
         <OverlayShapes
           entities={displayEntities}
           selectedIds={selectedIds}
           hoverId={hoverId}
-          scale={scale * zoom}
+          scale={screenScale}
           layers={layers}
+          groupVisible={shapesGroupVisible}
           hiddenLabels={hiddenLabels}
           draftPoints={overlayMode === "annotate" ? draftPoints : undefined}
           draftClosed={overlayMode === "annotate" && (draft?.tool === "polygon" || draft?.tool === "mask")}
-          draftRect={overlayMode === "annotate" || layoutDrawing ? draftRect : null}
+          draftRect={
+            overlayMode === "annotate" || layoutDrawing || draft?.tool === "marquee" ? draftRect : null
+          }
+          draftRectMode={draft?.tool === "marquee" ? "marquee" : "draw"}
           activeTile={activeTile}
           ocrRegion={ocrRegion}
           activeOcrTile={activeOcrTile}
           fillOnlyClosed={overlayMode === "detections" && !layoutDrawing && !layoutEditing}
+          compassKeypointVisible={compassKeypointVisible}
+          wallClassById={wallClassById}
+          mainDoorIds={mainDoorIds}
         />
+        {showGeometryOverlays && geometryEntities.length > 0 ? (
+          <OverlayShapes
+            entities={geometryEntities}
+            selectedIds={geometrySelectedId ? [geometrySelectedId] : []}
+            hoverId={null}
+            scale={screenScale}
+            layers={layers}
+            groupVisible={shapesGroupVisible}
+            hiddenLabels={hiddenLabels}
+            fillOnlyClosed={overlayMode === "detections"}
+          />
+        ) : null}
         {layoutEditMode && selectedLayoutRect
           ? resizeHandleCenters(selectedLayoutRect).map(({ handle, x, y }) => (
-              <Circle
+              <circle
                 key={handle}
-                x={x}
-                y={y}
-                radius={handleSize}
+                cx={x}
+                cy={y}
+                r={handleSize}
                 fill="#0f766e"
                 stroke="white"
                 strokeWidth={screenPx(1.5)}
-                listening={false}
               />
             ))
           : null}
-      </OverlayKonvaStage>
+      </OverlaySvgLayer>
     </div>
   );
 }
 
-function cursorFor(tool: OverlayTool, capture: boolean, layoutEditing: boolean): string {
+function cursorFor(tool: OverlayTool, capture: boolean, drawing: boolean): string {
   if (!capture) return "inherit";
-  if (tool === "select") return layoutEditing ? "default" : "default";
-  if (isDrawTool(tool)) return "crosshair";
-  return "grab";
+  if (drawing) return "crosshair";
+  if (tool === "marquee") return "crosshair";
+  return "default";
 }

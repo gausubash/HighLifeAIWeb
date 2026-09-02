@@ -4,10 +4,17 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { projectStore } from "@/lib/data/projectStore";
-import { useLayoutStore } from "@/features/plan-viewer/useLayoutStore";
+
+const CRUMB_MAX = 12;
+
+function shortenLabel(label: string): string {
+  if (label.length <= CRUMB_MAX) return label;
+  return `${label.slice(0, CRUMB_MAX)}…`;
+}
 
 function buildBreadcrumbs(
-  pathname: string
+  pathname: string,
+  search = "",
 ): { label: string; href?: string }[] {
   const crumbs: { label: string; href?: string }[] = [];
   if (pathname.startsWith("/studio")) {
@@ -41,7 +48,7 @@ function buildBreadcrumbs(
       label: analysis?.sourceFileName ?? "Drawing",
       href: `/projects/${projectId}/analyses/${analysisId}`,
     });
-    if (pathname.endsWith("/review")) {
+    if (pathname.endsWith("/review") || new URLSearchParams(search).get("tab") === "review") {
       crumbs.push({ label: "Review" });
     }
   }
@@ -55,52 +62,38 @@ export function AppTopBar() {
     { label: "Projects", href: "/projects" },
   ]);
 
-  const sidebarOpen = useLayoutStore((s) => s.sidebarOpen);
-  const inspectorOpen = useLayoutStore((s) => s.inspectorOpen);
-  const toggleSidebar = useLayoutStore((s) => s.toggleSidebar);
-  const toggleInspector = useLayoutStore((s) => s.toggleInspector);
-
-  // Breadcrumbs depend on localStorage-backed store — set after mount
   useEffect(() => {
-    const sync = () => setCrumbs(buildBreadcrumbs(pathname));
+    const sync = () => setCrumbs(buildBreadcrumbs(pathname, window.location.search));
     sync();
     return projectStore.subscribe(sync);
   }, [pathname]);
 
   return (
-    <header className="flex h-9 shrink-0 items-center gap-2 border-b border-slate-200 bg-white px-2">
-      <button
-        type="button"
-        title={sidebarOpen ? "Hide sidebar (Ctrl+B)" : "Show sidebar (Ctrl+B)"}
-        onClick={toggleSidebar}
-        className="rounded border border-slate-200 px-1.5 py-0.5 text-[11px] text-slate-600 hover:bg-slate-50"
-      >
-        {sidebarOpen ? "◀" : "▶"}
-      </button>
-
-      <nav className="flex min-w-0 flex-1 items-center gap-1 text-xs text-slate-500">
-        {crumbs.map((crumb, index) => (
-          <span key={`${crumb.label}-${index}`} className="flex min-w-0 items-center gap-1">
-            {index > 0 && <span className="text-slate-300">/</span>}
-            {crumb.href && index < crumbs.length - 1 ? (
-              <Link href={crumb.href} className="truncate hover:text-brand-600">
-                {crumb.label}
-              </Link>
-            ) : (
-              <span className="truncate font-medium text-slate-800">{crumb.label}</span>
-            )}
-          </span>
-        ))}
-      </nav>
-
-      <button
-        type="button"
-        title={inspectorOpen ? "Hide inspector (Ctrl+I)" : "Show inspector (Ctrl+I)"}
-        onClick={toggleInspector}
-        className="rounded border border-slate-200 px-1.5 py-0.5 text-[11px] text-slate-600 hover:bg-slate-50"
-      >
-        {inspectorOpen ? "▶" : "◀"}
-      </button>
-    </header>
+    <nav
+      className="flex min-w-0 items-center gap-1 text-xs text-slate-500"
+      aria-label="Breadcrumb"
+    >
+      {crumbs.map((crumb, index) => (
+        <span key={`${crumb.label}-${index}`} className="flex min-w-0 items-center gap-1">
+          {index > 0 && <span className="text-slate-300">/</span>}
+          {crumb.href && index < crumbs.length - 1 ? (
+            <Link
+              href={crumb.href}
+              title={crumb.label}
+              className="shrink-0 hover:text-brand-600"
+            >
+              {shortenLabel(crumb.label)}
+            </Link>
+          ) : (
+            <span
+              title={crumb.label}
+              className="shrink-0 font-medium text-slate-700"
+            >
+              {shortenLabel(crumb.label)}
+            </span>
+          )}
+        </span>
+      ))}
+    </nav>
   );
 }

@@ -2,6 +2,19 @@ import type { Point } from "@highlife/shared-types";
 import type { OverlayEntity, OverlayGeometry } from "./types";
 import { geometryBBox } from "./types";
 
+export function overlayGeometryPoints(geometry: OverlayGeometry): Point[] {
+  if (geometry.kind === "rect") {
+    return [
+      { x: geometry.x, y: geometry.y },
+      { x: geometry.x + geometry.width, y: geometry.y },
+      { x: geometry.x + geometry.width, y: geometry.y + geometry.height },
+      { x: geometry.x, y: geometry.y + geometry.height },
+    ];
+  }
+  if (geometry.kind === "point") return [{ x: geometry.x, y: geometry.y }];
+  return geometry.points;
+}
+
 export function dist2(a: Point, b: Point): number {
   const dx = a.x - b.x;
   const dy = a.y - b.y;
@@ -82,6 +95,21 @@ export function hitTestEntities(
     }
   }
   return null;
+}
+
+export function rectsIntersect(
+  a: { x: number; y: number; width: number; height: number },
+  b: { x: number; y: number; width: number; height: number },
+): boolean {
+  return a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
+}
+
+export function entitiesInRect(
+  entities: OverlayEntity[],
+  rect: { x: number; y: number; width: number; height: number },
+): OverlayEntity[] {
+  if (rect.width <= 0 && rect.height <= 0) return [];
+  return entities.filter((entity) => rectsIntersect(geometryBBox(entity.geometry), rect));
 }
 
 export function normalizeRect(x0: number, y0: number, x1: number, y1: number) {

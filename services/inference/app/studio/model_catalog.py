@@ -18,8 +18,9 @@ from app.yolo.predict import (
 )
 
 LAYOUT_BASE_ID = "yolo_layout.pt"
-WALL_YOLO_BASE_ID = "yolo_walls_obb.pt"
 ROOM_BASE_ID = "yolo_room.pt"
+MITUNET_BASE_ID = "mitunet_walls.pth"
+WALL_YOLO_BASE_ID = "yolo_walls_obb.pt"
 
 _LAYOUT_ALIASES = frozenset(
     {
@@ -28,36 +29,42 @@ _LAYOUT_ALIASES = frozenset(
         "yolo11x-blueprint-layout-detector",
     }
 )
-_WALL_YOLO_ALIASES = frozenset(
-    {
-        "yolo_walls_obb.pt",
-        "wall:yolo",
-        "yolo11x-blueprint-wall-detector",
-    }
-)
 _ROOM_ALIASES = frozenset(
     {
         "yolo_room.pt",
         "architect_floorplan.pt",
         "architect-floorplan-cad",
         "samirshabani/architect",
+        "room:architect",
+        "object:architect",
+        "opening:architect",
     }
 )
 
 CATEGORY_LAYOUT = "layout_analysis"
-CATEGORY_WALL_DETECT = "wall_detection"
-CATEGORY_ROOM_DETECT = "room_detection"
 CATEGORY_WALL_SEGMENT = "wall_segmentation"
-CATEGORY_GENERAL_DETECT = "general_detection"
-CATEGORY_GENERAL_SEGMENT = "general_segmentation"
+CATEGORY_ROOM_TYPES = "room_types"
+CATEGORY_OBJECT_DETECT = "object_detection"
+CATEGORY_OPENING_DETECT = "opening_detection"
+CATEGORY_STRUCTURAL_DETECT = "structural_detection"
+CATEGORY_NORTH_ARROW = "north_arrow"
+
+# Retired names still present on older datasets / models.
+CATEGORY_ALIASES: dict[str, str] = {
+    "wall_detection": CATEGORY_WALL_SEGMENT,
+    "room_detection": CATEGORY_ROOM_TYPES,
+    "general_detection": CATEGORY_OBJECT_DETECT,
+    "general_segmentation": CATEGORY_ROOM_TYPES,
+}
 
 CATEGORY_LABELS: dict[str, str] = {
     CATEGORY_LAYOUT: "Layout analysis",
-    CATEGORY_WALL_DETECT: "Wall detection",
-    CATEGORY_ROOM_DETECT: "Room & fixture detection",
     CATEGORY_WALL_SEGMENT: "Wall segmentation",
-    CATEGORY_GENERAL_DETECT: "General object detection",
-    CATEGORY_GENERAL_SEGMENT: "General instance segmentation",
+    CATEGORY_ROOM_TYPES: "Room type segmentation",
+    CATEGORY_OBJECT_DETECT: "Object detection",
+    CATEGORY_OPENING_DETECT: "Opening detection",
+    CATEGORY_STRUCTURAL_DETECT: "Structural detection",
+    CATEGORY_NORTH_ARROW: "North arrow",
 }
 
 DATASET_CATEGORY_DEFAULTS: dict[str, dict[str, object]] = {
@@ -72,13 +79,13 @@ DATASET_CATEGORY_DEFAULTS: dict[str, dict[str, object]] = {
         ],
         "default_base": LAYOUT_BASE_ID,
     },
-    CATEGORY_WALL_DETECT: {
-        "task": "detect",
+    CATEGORY_WALL_SEGMENT: {
+        "task": "segment",
         "class_names": ["Wall", "External Wall"],
-        "default_base": WALL_YOLO_BASE_ID,
+        "default_base": MITUNET_BASE_ID,
     },
-    CATEGORY_ROOM_DETECT: {
-        "task": "detect",
+    CATEGORY_ROOM_TYPES: {
+        "task": "segment",
         "class_names": [
             "Unit",
             "Open Living",
@@ -91,37 +98,53 @@ DATASET_CATEGORY_DEFAULTS: dict[str, dict[str, object]] = {
             "Balcony",
             "Lobby",
             "Communal Space",
-            "Wall",
-            "External Wall",
-            "Single Door",
-            "Sliding Door",
-            "Main Door",
-            "Window",
-            "Stair",
-            "Lift",
         ],
+        "default_base": "yolov8n-seg.pt",
+    },
+    CATEGORY_OBJECT_DETECT: {
+        "task": "detect",
+        "class_names": ["Stair", "Lift"],
         "default_base": ROOM_BASE_ID,
     },
-    CATEGORY_WALL_SEGMENT: {
-        "task": "segment",
-        "class_names": ["Wall", "External Wall"],
-        "default_base": "mitunet_walls.pth",
-    },
-    CATEGORY_GENERAL_DETECT: {
+    CATEGORY_OPENING_DETECT: {
         "task": "detect",
-        "class_names": ["Unit", "Bedroom", "Bathroom", "Wall", "Window", "Door"],
-        "default_base": "yolov8n.pt",
+        "class_names": ["Single Door", "Sliding Door", "Main Door", "Window"],
+        "default_base": ROOM_BASE_ID,
     },
-    CATEGORY_GENERAL_SEGMENT: {
+    CATEGORY_STRUCTURAL_DETECT: {
         "task": "segment",
-        "class_names": ["Wall", "External Wall", "Unit"],
-        "default_base": "yolov8n-seg.pt",
+        "class_names": ["Wall", "Door", "Window"],
+        "default_base": ROOM_BASE_ID,
+    },
+    CATEGORY_NORTH_ARROW: {
+        "task": "pose",
+        "class_names": ["North Arrow"],
+        "default_base": "yolo26n-pose.pt",
     },
 }
 
 
+def normalize_category(category: str | None) -> str | None:
+    raw = (category or "").strip()
+    if not raw:
+        return None
+    mapped = CATEGORY_ALIASES.get(raw, raw)
+    if mapped in DATASET_CATEGORY_DEFAULTS:
+        return mapped
+    return mapped if mapped in CATEGORY_LABELS else raw
+
+
 def _leaf(name: str) -> str:
     return (name or "").strip().lower().replace("\\", "/")
+
+
+_WALL_YOLO_ALIASES = frozenset(
+    {
+        "yolo_walls_obb.pt",
+        "wall:yolo",
+        "yolo11x-blueprint-wall-detector",
+    }
+)
 
 
 def is_layout_base(base_model: str) -> bool:
@@ -187,6 +210,20 @@ def pretrained_base_meta(base_id: str) -> dict[str, object] | None:
             "runnable": runnable,
             "ready": ready,
         }
+    if is_room_base(base_id):
+        local = default_room_weights_path()
+        resolved = resolve_room_weights() or (str(local) if local.is_file() else HF_ROOM_WEIGHTS)
+        ready, runnable = _weights_ready(resolved, local, HF_ROOM_WEIGHTS)
+        return {
+            "id": ROOM_BASE_ID,
+            "name": "Architect objects (YOLO)",
+            "task": "detect",
+            "family": "architect",
+            "category": CATEGORY_OBJECT_DETECT,
+            "description": "Doors, windows, stairs, lifts — SamirShabani/Architect.",
+            "runnable": runnable,
+            "ready": ready,
+        }
     if is_wall_yolo_base(base_id):
         local = default_wall_weights_path()
         resolved = resolve_wall_weights() or (str(local) if local.is_file() else HF_WALL_WEIGHTS)
@@ -196,22 +233,8 @@ def pretrained_base_meta(base_id: str) -> dict[str, object] | None:
             "name": "GreenMap wall OBB (YOLO11x)",
             "task": "detect",
             "family": "greenmap",
-            "category": CATEGORY_WALL_DETECT,
+            "category": CATEGORY_WALL_SEGMENT,
             "description": "Oriented wall boxes — yolo11x-blueprint-wall-detector.",
-            "runnable": runnable,
-            "ready": ready,
-        }
-    if is_room_base(base_id):
-        local = default_room_weights_path()
-        resolved = resolve_room_weights() or (str(local) if local.is_file() else HF_ROOM_WEIGHTS)
-        ready, runnable = _weights_ready(resolved, local, HF_ROOM_WEIGHTS)
-        return {
-            "id": ROOM_BASE_ID,
-            "name": "Architect room & fixtures (YOLO)",
-            "task": "detect",
-            "family": "architect",
-            "category": CATEGORY_ROOM_DETECT,
-            "description": "Rooms, doors, windows — SamirShabani/Architect.",
             "runnable": runnable,
             "ready": ready,
         }
@@ -222,16 +245,23 @@ def category_for_base(base_id: str, *, task: str, family: str) -> str:
     meta = pretrained_base_meta(base_id)
     if meta:
         return str(meta["category"])
-    if family == "mitunet" or family == "floordata":
+    if family == "mitunet":
         return CATEGORY_WALL_SEGMENT
-    if family == "mmdet":
-        return CATEGORY_WALL_DETECT
+    if family == "floordata":
+        return CATEGORY_WALL_SEGMENT
     if task == "segment":
-        return CATEGORY_GENERAL_SEGMENT
-    return CATEGORY_GENERAL_DETECT
+        return CATEGORY_ROOM_TYPES
+    if task == "pose" or "-pose" in (base_id or "").lower():
+        return CATEGORY_NORTH_ARROW
+    return CATEGORY_OBJECT_DETECT
 
 
 def default_base_for_category(category: str | None, task: str) -> str:
-    if category and category in DATASET_CATEGORY_DEFAULTS:
-        return str(DATASET_CATEGORY_DEFAULTS[category]["default_base"])
-    return "yolov8n-seg.pt" if task == "segment" else "yolov8n.pt"
+    cat = normalize_category(category)
+    if cat and cat in DATASET_CATEGORY_DEFAULTS:
+        return str(DATASET_CATEGORY_DEFAULTS[cat]["default_base"])
+    if task == "segment":
+        return MITUNET_BASE_ID
+    if task == "pose":
+        return "yolo26n-pose.pt"
+    return "yolov8n.pt"

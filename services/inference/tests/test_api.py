@@ -106,3 +106,36 @@ def test_analyze_mock() -> None:
     assert payload["ok"] is True
     assert payload["result"]["analysis_id"] == "api-test-analysis"
     assert payload["result"]["project_id"] == "api-test-project"
+
+
+def test_geometry_extract_composes(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.yolo.predict import DetectedRegion
+
+    def fake_extract(image_bytes, **kwargs):
+        region = DetectedRegion(
+            id="geo-1",
+            type="room",
+            label="Bedroom",
+            confidence=1,
+            polygon=[(0, 0), (10, 0), (10, 10), (0, 10)],
+            bbox=(0, 0, 10, 10),
+            attributes={"extractMethod": "wall_bounded", "unitLabel": "Unit 37"},
+        )
+        return [region], 10, 10, None
+
+    monkeypatch.setattr("app.api.extract_from_image", fake_extract)
+    from io import BytesIO
+
+    from PIL import Image
+
+    buf = BytesIO()
+    Image.new("RGB", (8, 6), (240, 240, 240)).save(buf, format="PNG")
+    res = client.post(
+        "/v1/geometry/extract",
+        data={"originalWidth": "10", "originalHeight": "10"},
+        files={"file": ("page.png", buf.getvalue(), "image/png")},
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["modelId"] == "geometry:wall_bounded"
+    assert body["regions"][0]["attributes"]["extractMethod"] == "wall_bounded"

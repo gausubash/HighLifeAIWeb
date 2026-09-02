@@ -4,6 +4,8 @@ export * from "./geometry";
 export * from "./compliance";
 export * from "./scene-graph";
 export * from "./hierarchy";
+export * from "./apartment";
+export * from "./policy";
 
 import type { AnalysisStage, AnalysisStatus } from "./analysis";
 import type { ComplianceResult, ReviewWarning, UnitSummary } from "./compliance";

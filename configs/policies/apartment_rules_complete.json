@@ -1,0 +1,2866 @@
+{
+  "metadata": {
+    "source": "Hooper et al. 2022, MethodsX - Table 1",
+    "description": "Complete apartment rules extracted from Table 1",
+    "total_rules": 122,
+    "note": "Merged from three separate files, row key removed"
+  },
+  "rules": [
+    {
+      "id": "solar_70pct_2h_winter",
+      "design_element": "solar_daylight_access",
+      "description": "At least 70% of apartments receive a minimum of 2 hours direct sunlight between 9am-3pm mid-winter",
+      "policy": [
+        "SEPP65",
+        "SPP7.3"
+      ],
+      "level": "building",
+      "variable": "fraction_apartments_solar_min_2h_9to3_midwinter",
+      "operator": ">=",
+      "value": 0.7,
+      "unit": "fraction",
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "solar_15pct_3h_winter",
+      "design_element": "solar_daylight_access",
+      "description": "At least 15% of apartments receive a minimum of 3 hours direct sunlight between 9am-3pm mid-winter",
+      "policy": [
+        "SEPP65",
+        "SPP7.3"
+      ],
+      "level": "building",
+      "variable": "fraction_apartments_solar_min_3h_9to3_midwinter",
+      "operator": ">=",
+      "value": 0.15,
+      "unit": "fraction",
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "habitable_rooms_window",
+      "design_element": "solar_daylight_access",
+      "description": "All habitable rooms have a window",
+      "policy": [
+        "SEPP65",
+        "SPP7.3",
+        "BADS"
+      ],
+      "level": "apartment",
+      "variable": "all_habitable_rooms_have_window",
+      "operator": "==",
+      "value": 1,
+      "unit": "boolean",
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "window_area_10pct_floor",
+      "design_element": "solar_daylight_access",
+      "description": "Window area in habitable rooms >= 10% of floor area",
+      "policy": [
+        "SEPP65",
+        "SPP7.3"
+      ],
+      "level": "apartment",
+      "variable": "habitable_room_window_to_floor_ratio",
+      "operator": ">=",
+      "value": 0.1,
+      "unit": "ratio",
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "living_room_window_15pct",
+      "design_element": "solar_daylight_access",
+      "description": "Living room window area >= 15% of floor area",
+      "policy": [
+        "SEPP65"
+      ],
+      "level": "apartment",
+      "variable": "living_room_window_to_floor_ratio",
+      "operator": ">=",
+      "value": 0.15,
+      "unit": "ratio",
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "bedroom_window_0_6m2",
+      "design_element": "solar_daylight_access",
+      "description": "Bedroom window area >= 0.6 m\u00b2",
+      "policy": [
+        "SPP7.3"
+      ],
+      "level": "apartment",
+      "variable": "bedroom_window_area_m2",
+      "operator": ">=",
+      "value": 0.6,
+      "unit": "m2",
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "living_dining_window_3m2",
+      "design_element": "solar_daylight_access",
+      "description": "Living/dining room window area >= 3 m\u00b2",
+      "policy": [
+        "SPP7.3"
+      ],
+      "level": "apartment",
+      "variable": "living_dining_window_area_m2",
+      "operator": ">=",
+      "value": 3.0,
+      "unit": "m2",
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "glass_area_10pct_single_aspect",
+      "design_element": "solar_daylight_access",
+      "description": "Single aspect apartments: glass area >= 10% of floor area",
+      "policy": [
+        "SPP7.3"
+      ],
+      "level": "apartment",
+      "variable": "glass_to_floor_ratio_single_aspect",
+      "operator": ">=",
+      "value": 0.1,
+      "unit": "ratio",
+      "applicability": {
+        "single_aspect": true
+      },
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "kitchen_window_adequate_daylight",
+      "design_element": "solar_daylight_access",
+      "description": "Kitchen has window providing adequate daylight",
+      "policy": [
+        "SPP7.3"
+      ],
+      "level": "apartment",
+      "variable": "kitchen_has_adequate_daylight_window",
+      "operator": "==",
+      "value": 1,
+      "unit": "boolean",
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "snorkel_min_area_6m2",
+      "design_element": "solar_daylight_access",
+      "description": "Snorkel bedroom: skylight/clerestory window >= 6 m\u00b2",
+      "policy": [
+        "BADS"
+      ],
+      "level": "apartment",
+      "variable": "snorkel_window_area_m2",
+      "operator": ">=",
+      "value": 6.0,
+      "unit": "m2",
+      "applicability": {
+        "has_snorkel_bedroom": true
+      },
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "cross_ventilation_60pct",
+      "design_element": "natural_ventilation",
+      "description": "At least 60% of apartments have cross ventilation",
+      "policy": [
+        "SEPP65",
+        "SPP7.3"
+      ],
+      "level": "building",
+      "variable": "fraction_apartments_cross_ventilation",
+      "operator": ">=",
+      "value": 0.6,
+      "unit": "fraction",
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "single_aspect_max_depth_8m",
+      "design_element": "natural_ventilation",
+      "description": "Single aspect apartments: maximum depth 8m",
+      "policy": [
+        "SEPP65",
+        "SPP7.3"
+      ],
+      "level": "apartment",
+      "variable": "apartment_depth_m",
+      "operator": "<=",
+      "value": 8.0,
+      "unit": "m",
+      "applicability": {
+        "single_aspect": true
+      },
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "openable_window_5pct_floor",
+      "design_element": "natural_ventilation",
+      "description": "Openable window area >= 5% of floor area in habitable rooms",
+      "policy": [
+        "SPP7.3",
+        "BADS"
+      ],
+      "level": "apartment",
+      "variable": "openable_window_to_floor_ratio",
+      "operator": ">=",
+      "value": 0.05,
+      "unit": "ratio",
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "cross_through_max_depth_18m",
+      "design_element": "natural_ventilation",
+      "description": "Cross-through apartments: maximum depth 18m",
+      "policy": [
+        "SEPP65"
+      ],
+      "level": "apartment",
+      "variable": "apartment_depth_m",
+      "operator": "<=",
+      "value": 18.0,
+      "unit": "m",
+      "applicability": {
+        "cross_through": true
+      },
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "bathroom_external_window",
+      "design_element": "natural_ventilation",
+      "description": "Bathrooms have external openable window (where possible)",
+      "policy": [
+        "SEPP65"
+      ],
+      "level": "apartment",
+      "variable": "fraction_bathrooms_external_window",
+      "operator": ">=",
+      "value": 0.5,
+      "unit": "fraction",
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "aggregate": "mean"
+        }
+      }
+    },
+    {
+      "id": "kitchen_external_window",
+      "design_element": "natural_ventilation",
+      "description": "Kitchen has external window for natural ventilation",
+      "policy": [
+        "SPP7.3",
+        "BADS"
+      ],
+      "level": "apartment",
+      "variable": "kitchen_has_external_window",
+      "operator": "==",
+      "value": 1,
+      "unit": "boolean",
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "bedroom_external_window",
+      "design_element": "natural_ventilation",
+      "description": "Bedrooms have external window",
+      "policy": [
+        "BADS"
+      ],
+      "level": "apartment",
+      "variable": "all_bedrooms_have_external_window",
+      "operator": "==",
+      "value": 1,
+      "unit": "boolean",
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "living_external_window",
+      "design_element": "natural_ventilation",
+      "description": "Living areas have external window",
+      "policy": [
+        "BADS"
+      ],
+      "level": "apartment",
+      "variable": "living_has_external_window",
+      "operator": "==",
+      "value": 1,
+      "unit": "boolean",
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "studio_min_35m2",
+      "design_element": "indoor_space",
+      "description": "Studio minimum internal area 35 m\u00b2",
+      "policy": [
+        "SEPP65"
+      ],
+      "level": "apartment",
+      "variable": "internal_area_m2",
+      "operator": ">=",
+      "value": 35.0,
+      "unit": "m2",
+      "applicability": {
+        "apartment_type": "studio"
+      },
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "1bed_min_50m2",
+      "design_element": "indoor_space",
+      "description": "1-bedroom minimum internal area 50 m\u00b2",
+      "policy": [
+        "SEPP65",
+        "SPP7.3"
+      ],
+      "level": "apartment",
+      "variable": "internal_area_m2",
+      "operator": ">=",
+      "value": 50.0,
+      "unit": "m2",
+      "applicability": {
+        "apartment_type": "1bed"
+      },
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "2bed_min_70m2",
+      "design_element": "indoor_space",
+      "description": "2-bedroom minimum internal area 70 m\u00b2",
+      "policy": [
+        "SEPP65",
+        "SPP7.3"
+      ],
+      "level": "apartment",
+      "variable": "internal_area_m2",
+      "operator": ">=",
+      "value": 70.0,
+      "unit": "m2",
+      "applicability": {
+        "apartment_type": "2bed"
+      },
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "3bed_min_90m2",
+      "design_element": "indoor_space",
+      "description": "3-bedroom minimum internal area 90 m\u00b2",
+      "policy": [
+        "SEPP65",
+        "SPP7.3"
+      ],
+      "level": "apartment",
+      "variable": "internal_area_m2",
+      "operator": ">=",
+      "value": 90.0,
+      "unit": "m2",
+      "applicability": {
+        "apartment_type": "3bed"
+      },
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "4bed_min_115m2",
+      "design_element": "indoor_space",
+      "description": "4-bedroom minimum internal area 115 m\u00b2 (add 12m\u00b2 per additional bedroom)",
+      "policy": [
+        "SPP7.3"
+      ],
+      "level": "apartment",
+      "variable": "internal_area_m2",
+      "operator": ">=",
+      "value": 115.0,
+      "unit": "m2",
+      "applicability": {
+        "apartment_type": "4bed"
+      },
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "primary_bedroom_min_10m2",
+      "design_element": "indoor_space",
+      "description": "Primary bedroom minimum area 10 m\u00b2",
+      "policy": [
+        "SEPP65",
+        "SPP7.3"
+      ],
+      "level": "apartment",
+      "variable": "primary_bedroom_area_m2",
+      "operator": ">=",
+      "value": 10.0,
+      "unit": "m2",
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "other_bedroom_min_9m2",
+      "design_element": "indoor_space",
+      "description": "Other bedrooms minimum area 9 m\u00b2",
+      "policy": [
+        "SEPP65",
+        "SPP7.3"
+      ],
+      "level": "apartment",
+      "variable": "other_bedroom_area_m2",
+      "operator": ">=",
+      "value": 9.0,
+      "unit": "m2",
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "bedroom_min_width_3m",
+      "design_element": "indoor_space",
+      "description": "Bedroom minimum width 3 m (excluding wardrobe)",
+      "policy": [
+        "SEPP65",
+        "SPP7.3"
+      ],
+      "level": "apartment",
+      "variable": "bedroom_min_width_m",
+      "operator": ">=",
+      "value": 3.0,
+      "unit": "m",
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "living_room_min_16m2",
+      "design_element": "indoor_space",
+      "description": "Living room minimum area 16 m\u00b2",
+      "policy": [
+        "SEPP65"
+      ],
+      "level": "apartment",
+      "variable": "living_room_area_m2",
+      "operator": ">=",
+      "value": 16.0,
+      "unit": "m2",
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "living_room_min_width_3_6m",
+      "design_element": "indoor_space",
+      "description": "Living room minimum width 3.6 m",
+      "policy": [
+        "SEPP65",
+        "SPP7.3"
+      ],
+      "level": "apartment",
+      "variable": "living_room_min_width_m",
+      "operator": ">=",
+      "value": 3.6,
+      "unit": "m",
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "living_dining_min_width_4m",
+      "design_element": "indoor_space",
+      "description": "Combined living/dining minimum width 4 m",
+      "policy": [
+        "SPP7.3"
+      ],
+      "level": "apartment",
+      "variable": "living_dining_min_width_m",
+      "operator": ">=",
+      "value": 4.0,
+      "unit": "m",
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "apartment_depth_optimal_12m",
+      "design_element": "indoor_space",
+      "description": "Apartment depth optimal 12m, max 18m",
+      "policy": [
+        "SEPP65"
+      ],
+      "level": "apartment",
+      "variable": "apartment_depth_m",
+      "operator": "<=",
+      "value": 12.0,
+      "unit": "m",
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "elif": {
+            "condition": "apartment_depth_m <= 18.0",
+            "score": 0.5
+          },
+          "if_not": 0.0
+        },
+        "building": {
+          "aggregate": "mean"
+        }
+      }
+    },
+    {
+      "id": "ceiling_height_min_2_7m",
+      "design_element": "indoor_space",
+      "description": "Habitable room ceiling height minimum 2.7 m",
+      "policy": [
+        "SEPP65",
+        "SPP7.3",
+        "BADS"
+      ],
+      "level": "apartment",
+      "variable": "ceiling_height_m",
+      "operator": ">=",
+      "value": 2.7,
+      "unit": "m",
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "depth_to_ceiling_ratio",
+      "design_element": "indoor_space",
+      "description": "Room depth to ceiling height ratio max 2.5x (bonus if <2.5)",
+      "policy": [
+        "SEPP65"
+      ],
+      "level": "apartment",
+      "variable": "room_depth_to_ceiling_ratio",
+      "operator": "<=",
+      "value": 2.5,
+      "unit": "ratio",
+      "scoring": {
+        "apartment": {
+          "if_met": 1.5,
+          "elif": {
+            "condition": "room_depth_to_ceiling_ratio <= 3.0",
+            "score": 1.0
+          },
+          "if_not": 0.0
+        },
+        "building": {
+          "aggregate": "mean"
+        }
+      }
+    },
+    {
+      "id": "storage_1bed_min_6m3",
+      "design_element": "indoor_space",
+      "description": "Storage 1-bed min 6 m\u00b3",
+      "policy": [
+        "SEPP65"
+      ],
+      "level": "apartment",
+      "variable": "storage_volume_m3",
+      "operator": ">=",
+      "value": 6.0,
+      "unit": "m3",
+      "applicability": {
+        "apartment_type": "1bed"
+      },
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "storage_2bed_min_8m3",
+      "design_element": "indoor_space",
+      "description": "Storage 2-bed min 8 m\u00b3",
+      "policy": [
+        "SEPP65",
+        "SPP7.3"
+      ],
+      "level": "apartment",
+      "variable": "storage_volume_m3",
+      "operator": ">=",
+      "value": 8.0,
+      "unit": "m3",
+      "applicability": {
+        "apartment_type": "2bed"
+      },
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "storage_3bed_min_10m3",
+      "design_element": "indoor_space",
+      "description": "Storage 3-bed min 10 m\u00b3",
+      "policy": [
+        "SEPP65",
+        "SPP7.3"
+      ],
+      "level": "apartment",
+      "variable": "storage_volume_m3",
+      "operator": ">=",
+      "value": 10.0,
+      "unit": "m3",
+      "applicability": {
+        "apartment_type": "3bed"
+      },
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "balcony_studio_min_4m2",
+      "design_element": "private_open_space",
+      "description": "Studio balcony minimum 4 m\u00b2",
+      "policy": [
+        "SEPP65"
+      ],
+      "level": "apartment",
+      "variable": "balcony_area_m2",
+      "operator": ">=",
+      "value": 4.0,
+      "unit": "m2",
+      "applicability": {
+        "apartment_type": "studio"
+      },
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "balcony_1bed_min_8m2",
+      "design_element": "private_open_space",
+      "description": "1-bedroom balcony minimum 8 m\u00b2",
+      "policy": [
+        "SEPP65",
+        "SPP7.3"
+      ],
+      "level": "apartment",
+      "variable": "balcony_area_m2",
+      "operator": ">=",
+      "value": 8.0,
+      "unit": "m2",
+      "applicability": {
+        "apartment_type": "1bed"
+      },
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "balcony_2bed_min_10m2",
+      "design_element": "private_open_space",
+      "description": "2-bedroom balcony minimum 10 m\u00b2",
+      "policy": [
+        "SEPP65",
+        "SPP7.3"
+      ],
+      "level": "apartment",
+      "variable": "balcony_area_m2",
+      "operator": ">=",
+      "value": 10.0,
+      "unit": "m2",
+      "applicability": {
+        "apartment_type": "2bed"
+      },
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "balcony_3bed_min_12m2",
+      "design_element": "private_open_space",
+      "description": "3-bedroom balcony minimum 12 m\u00b2",
+      "policy": [
+        "SEPP65",
+        "SPP7.3"
+      ],
+      "level": "apartment",
+      "variable": "balcony_area_m2",
+      "operator": ">=",
+      "value": 12.0,
+      "unit": "m2",
+      "applicability": {
+        "apartment_type": "3bed"
+      },
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "balcony_4bed_min_15m2",
+      "design_element": "private_open_space",
+      "description": "4-bedroom balcony minimum 15 m\u00b2",
+      "policy": [
+        "SPP7.3"
+      ],
+      "level": "apartment",
+      "variable": "balcony_area_m2",
+      "operator": ">=",
+      "value": 15.0,
+      "unit": "m2",
+      "applicability": {
+        "apartment_type": "4bed"
+      },
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "balcony_min_depth_2m",
+      "design_element": "private_open_space",
+      "description": "Balcony minimum depth 2 m",
+      "policy": [
+        "SEPP65",
+        "SPP7.3",
+        "BADS"
+      ],
+      "level": "apartment",
+      "variable": "balcony_min_depth_m",
+      "operator": ">=",
+      "value": 2.0,
+      "unit": "m",
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "balcony_min_width_2_4m",
+      "design_element": "private_open_space",
+      "description": "Balcony minimum width 2.4 m",
+      "policy": [
+        "SPP7.3"
+      ],
+      "level": "apartment",
+      "variable": "balcony_min_width_m",
+      "operator": ">=",
+      "value": 2.4,
+      "unit": "m",
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "ground_private_open_space_15m2",
+      "design_element": "private_open_space",
+      "description": "Ground level apartments: private open space minimum 15 m\u00b2",
+      "policy": [
+        "SPP7.3"
+      ],
+      "level": "apartment",
+      "variable": "ground_private_open_space_m2",
+      "operator": ">=",
+      "value": 15.0,
+      "unit": "m2",
+      "applicability": {
+        "floor_level": 0
+      },
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "courtyard_min_depth_3m",
+      "design_element": "private_open_space",
+      "description": "Courtyard minimum depth 3 m",
+      "policy": [
+        "SEPP65"
+      ],
+      "level": "apartment",
+      "variable": "courtyard_min_depth_m",
+      "operator": ">=",
+      "value": 3.0,
+      "unit": "m",
+      "applicability": {
+        "has_courtyard": true
+      },
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "balcony_private_open_space_min_8m2_bads",
+      "design_element": "private_open_space",
+      "description": "Balcony/private open space minimum 8 m\u00b2",
+      "policy": [
+        "BADS"
+      ],
+      "level": "apartment",
+      "variable": "private_open_space_area_m2",
+      "operator": ">=",
+      "value": 8.0,
+      "unit": "m2",
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "communal_open_space_min_25m2_per_apt",
+      "design_element": "communal_spaces",
+      "description": "Communal open space minimum 25 m\u00b2 per apartment",
+      "policy": [
+        "SEPP65",
+        "SPP7.3",
+        "BADS"
+      ],
+      "level": "building",
+      "variable": "communal_open_space_m2_per_apartment",
+      "operator": ">=",
+      "value": 25.0,
+      "unit": "m2_per_apartment",
+      "scoring": {
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "communal_space_50pct_solar_2h",
+      "design_element": "communal_spaces",
+      "description": "At least 50% of communal space receives 2h direct sunlight mid-winter",
+      "policy": [
+        "SEPP65",
+        "SPP7.3"
+      ],
+      "level": "building",
+      "variable": "fraction_communal_space_solar_2h_midwinter",
+      "operator": ">=",
+      "value": 0.5,
+      "unit": "fraction",
+      "scoring": {
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "communal_space_min_dimension_3m",
+      "design_element": "communal_spaces",
+      "description": "Communal space minimum dimension 3 m",
+      "policy": [
+        "SEPP65",
+        "SPP7.3"
+      ],
+      "level": "building",
+      "variable": "communal_space_min_dimension_m",
+      "operator": ">=",
+      "value": 3.0,
+      "unit": "m",
+      "scoring": {
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "indoor_communal_space_provided",
+      "design_element": "communal_spaces",
+      "description": "Indoor communal space provided",
+      "policy": [
+        "SEPP65"
+      ],
+      "level": "building",
+      "variable": "has_indoor_communal_space",
+      "operator": "==",
+      "value": 1,
+      "unit": "boolean",
+      "scoring": {
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "communal_space_accessible_50pct",
+      "design_element": "communal_spaces",
+      "description": "At least 50% of apartments have convenient access to communal space",
+      "policy": [
+        "SPP7.3"
+      ],
+      "level": "building",
+      "variable": "fraction_apartments_access_communal",
+      "operator": ">=",
+      "value": 0.5,
+      "unit": "fraction",
+      "scoring": {
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "communal_space_min_area_200m2",
+      "design_element": "communal_spaces",
+      "description": "Communal open space minimum total area 200 m\u00b2",
+      "policy": [
+        "SPP7.3"
+      ],
+      "level": "building",
+      "variable": "communal_open_space_total_m2",
+      "operator": ">=",
+      "value": 200.0,
+      "unit": "m2",
+      "scoring": {
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "communal_space_direct_street_access",
+      "design_element": "communal_spaces",
+      "description": "Communal space has direct street access",
+      "policy": [
+        "BADS"
+      ],
+      "level": "building",
+      "variable": "communal_space_has_street_access",
+      "operator": "==",
+      "value": 1,
+      "unit": "boolean",
+      "scoring": {
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "corridor_min_width_1_2m",
+      "design_element": "circulation_spaces",
+      "description": "Corridor minimum width 1.2 m",
+      "policy": [
+        "SEPP65"
+      ],
+      "level": "floor",
+      "variable": "corridor_min_width_m",
+      "operator": ">=",
+      "value": 1.2,
+      "unit": "m",
+      "scoring": {
+        "apartment": {
+          "inherited_from_floor": true
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "corridor_min_width_1_5m",
+      "design_element": "circulation_spaces",
+      "description": "Corridor minimum width 1.5 m",
+      "policy": [
+        "SPP7.3"
+      ],
+      "level": "floor",
+      "variable": "corridor_min_width_m",
+      "operator": ">=",
+      "value": 1.5,
+      "unit": "m",
+      "scoring": {
+        "apartment": {
+          "inherited_from_floor": true
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "primary_circulation_width_1_8m",
+      "design_element": "circulation_spaces",
+      "description": "Primary circulation route minimum width 1.8 m",
+      "policy": [
+        "SPP7.3"
+      ],
+      "level": "floor",
+      "variable": "primary_circulation_min_width_m",
+      "operator": ">=",
+      "value": 1.8,
+      "unit": "m",
+      "scoring": {
+        "apartment": {
+          "inherited_from_floor": true
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "corridor_max_length_12m",
+      "design_element": "circulation_spaces",
+      "description": "Corridor maximum length 12 m (dead-end single-loaded)",
+      "policy": [
+        "SEPP65"
+      ],
+      "level": "floor",
+      "variable": "dead_end_corridor_length_m",
+      "operator": "<=",
+      "value": 12.0,
+      "unit": "m",
+      "scoring": {
+        "apartment": {
+          "inherited_from_floor": true
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "corridor_max_apartments_8",
+      "design_element": "circulation_spaces",
+      "description": "Maximum 8 apartments off single-loaded corridor",
+      "policy": [
+        "SEPP65",
+        "SPP7.3"
+      ],
+      "level": "floor",
+      "variable": "apartments_per_single_loaded_corridor",
+      "operator": "<=",
+      "value": 8,
+      "unit": "count",
+      "scoring": {
+        "apartment": {
+          "inherited_from_floor": true
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "apartments_per_core_max_8",
+      "design_element": "circulation_spaces",
+      "description": "Maximum 8 apartments per floor core",
+      "policy": [
+        "SEPP65"
+      ],
+      "level": "floor",
+      "variable": "apartments_per_core",
+      "operator": "<=",
+      "value": 8,
+      "unit": "count",
+      "scoring": {
+        "apartment": {
+          "inherited_from_floor": true
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "apartments_per_core_max_12",
+      "design_element": "circulation_spaces",
+      "description": "Maximum 12 apartments per floor core (with fire stairs both ends)",
+      "policy": [
+        "SPP7.3"
+      ],
+      "level": "floor",
+      "variable": "apartments_per_core_with_dual_stairs",
+      "operator": "<=",
+      "value": 12,
+      "unit": "count",
+      "applicability": {
+        "has_fire_stairs_both_ends": true
+      },
+      "scoring": {
+        "apartment": {
+          "inherited_from_floor": true
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "lift_access_max_40_apartments",
+      "design_element": "circulation_spaces",
+      "description": "Lift access provided for buildings with >40 apartments",
+      "policy": [
+        "BADS"
+      ],
+      "level": "building",
+      "variable": "has_lift_access",
+      "operator": "==",
+      "value": 1,
+      "unit": "boolean",
+      "applicability": {
+        "total_apartments": {
+          ">": 40
+        }
+      },
+      "scoring": {
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "separating_wall_rw_50",
+      "design_element": "acoustic_privacy",
+      "description": "Separating walls between apartments Rw \u226550",
+      "policy": [
+        "SEPP65",
+        "SPP7.3",
+        "BADS"
+      ],
+      "level": "apartment",
+      "variable": "separating_wall_rw_rating",
+      "operator": ">=",
+      "value": 50,
+      "unit": "Rw",
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "separating_floor_rw_45_ln_55",
+      "design_element": "acoustic_privacy",
+      "description": "Separating floors Rw \u226545 and Ln,w \u226455",
+      "policy": [
+        "SEPP65",
+        "BADS"
+      ],
+      "level": "apartment",
+      "variable": "separating_floor_meets_acoustic_standard",
+      "operator": "==",
+      "value": 1,
+      "unit": "boolean",
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "wall_to_corridor_rw_40",
+      "design_element": "acoustic_privacy",
+      "description": "Wall between apartment and corridor Rw \u226540",
+      "policy": [
+        "SEPP65",
+        "SPP7.3"
+      ],
+      "level": "apartment",
+      "variable": "corridor_wall_rw_rating",
+      "operator": ">=",
+      "value": 40,
+      "unit": "Rw",
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "bedrooms_not_adjacent_living",
+      "design_element": "acoustic_privacy",
+      "description": "Bedrooms not adjacent to living rooms of other apartments",
+      "policy": [
+        "SEPP65",
+        "SPP7.3",
+        "BADS"
+      ],
+      "level": "apartment",
+      "variable": "bedrooms_separated_from_neighbor_living",
+      "operator": "==",
+      "value": 1,
+      "unit": "boolean",
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "habitable_not_adjacent_bathroom",
+      "design_element": "acoustic_privacy",
+      "description": "Habitable rooms not adjacent to bathrooms of other apartments",
+      "policy": [
+        "SEPP65",
+        "SPP7.3"
+      ],
+      "level": "apartment",
+      "variable": "habitable_separated_from_neighbor_bathroom",
+      "operator": "==",
+      "value": 1,
+      "unit": "boolean",
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "mechanical_services_separated",
+      "design_element": "acoustic_privacy",
+      "description": "Mechanical services separated from habitable rooms",
+      "policy": [
+        "SEPP65",
+        "SPP7.3"
+      ],
+      "level": "apartment",
+      "variable": "mechanical_services_separated",
+      "operator": "==",
+      "value": 1,
+      "unit": "boolean",
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "entry_door_rw_30",
+      "design_element": "acoustic_privacy",
+      "description": "Entry door Rw \u226530",
+      "policy": [
+        "SPP7.3"
+      ],
+      "level": "apartment",
+      "variable": "entry_door_rw_rating",
+      "operator": ">=",
+      "value": 30,
+      "unit": "Rw",
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "glazing_external_noise_rated",
+      "design_element": "acoustic_privacy",
+      "description": "External glazing rated for noise attenuation",
+      "policy": [
+        "SPP7.3"
+      ],
+      "level": "apartment",
+      "variable": "glazing_has_noise_rating",
+      "operator": "==",
+      "value": 1,
+      "unit": "boolean",
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "roof_ceiling_rw_40",
+      "design_element": "acoustic_privacy",
+      "description": "Roof and ceiling construction Rw \u226540",
+      "policy": [
+        "SPP7.3"
+      ],
+      "level": "apartment",
+      "variable": "roof_ceiling_rw_rating",
+      "operator": ">=",
+      "value": 40,
+      "unit": "Rw",
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "habitable_outlook_windows",
+      "design_element": "outlook_visual_privacy",
+      "description": "Habitable rooms have outlook windows",
+      "policy": [
+        "SEPP65",
+        "SPP7.3"
+      ],
+      "level": "apartment",
+      "variable": "all_habitable_rooms_have_outlook",
+      "operator": "==",
+      "value": 1,
+      "unit": "boolean",
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "living_room_outlook_quality",
+      "design_element": "outlook_visual_privacy",
+      "description": "Living room has quality outlook (open space/streetscape)",
+      "policy": [
+        "SEPP65",
+        "SPP7.3"
+      ],
+      "level": "apartment",
+      "variable": "living_has_quality_outlook",
+      "operator": "==",
+      "value": 1,
+      "unit": "boolean",
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "visual_privacy_setback_3m",
+      "design_element": "outlook_visual_privacy",
+      "description": "Windows setback 3m from boundaries/other apartments",
+      "policy": [
+        "SEPP65"
+      ],
+      "level": "apartment",
+      "variable": "window_setback_from_boundary_m",
+      "operator": ">=",
+      "value": 3.0,
+      "unit": "m",
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "balcony_setback_4m",
+      "design_element": "outlook_visual_privacy",
+      "description": "Balconies setback 4m from boundaries/other apartments",
+      "policy": [
+        "SEPP65",
+        "SPP7.3"
+      ],
+      "level": "apartment",
+      "variable": "balcony_setback_from_boundary_m",
+      "operator": ">=",
+      "value": 4.0,
+      "unit": "m",
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "screening_offset_windows",
+      "design_element": "outlook_visual_privacy",
+      "description": "Screening or offset windows for visual privacy",
+      "policy": [
+        "SEPP65",
+        "SPP7.3"
+      ],
+      "level": "apartment",
+      "variable": "has_privacy_screening_or_offset",
+      "operator": "==",
+      "value": 1,
+      "unit": "boolean",
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "bedroom_window_1_5m_sill",
+      "design_element": "outlook_visual_privacy",
+      "description": "Bedroom windows 1.5m sill height for privacy",
+      "policy": [
+        "SPP7.3"
+      ],
+      "level": "apartment",
+      "variable": "bedroom_window_sill_height_m",
+      "operator": ">=",
+      "value": 1.5,
+      "unit": "m",
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "obscure_glazing_bathroom",
+      "design_element": "outlook_visual_privacy",
+      "description": "Obscure glazing or screening for bathroom windows",
+      "policy": [
+        "SPP7.3"
+      ],
+      "level": "apartment",
+      "variable": "bathroom_has_privacy_treatment",
+      "operator": "==",
+      "value": 1,
+      "unit": "boolean",
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "habitable_room_outlook_3m",
+      "design_element": "outlook_visual_privacy",
+      "description": "Habitable room outlook at least 3m (to wall/boundary)",
+      "policy": [
+        "BADS"
+      ],
+      "level": "apartment",
+      "variable": "habitable_room_outlook_distance_m",
+      "operator": ">=",
+      "value": 3.0,
+      "unit": "m",
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "visitor_parking_1_per_5_apartments",
+      "design_element": "bicycle_car_parking",
+      "description": "Visitor car parking: 1 space per 5 apartments",
+      "policy": [
+        "SEPP65"
+      ],
+      "level": "building",
+      "variable": "visitor_parking_ratio",
+      "operator": ">=",
+      "value": 0.2,
+      "unit": "spaces_per_apartment",
+      "scoring": {
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "resident_parking_1bed_1_space",
+      "design_element": "bicycle_car_parking",
+      "description": "Resident car parking 1-bed: 1 space per apartment",
+      "policy": [
+        "SEPP65"
+      ],
+      "level": "building",
+      "variable": "resident_parking_1bed_ratio",
+      "operator": ">=",
+      "value": 1.0,
+      "unit": "spaces_per_1bed_apartment",
+      "scoring": {
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "resident_parking_2bed_1_space",
+      "design_element": "bicycle_car_parking",
+      "description": "Resident car parking 2-bed: 1 space per apartment",
+      "policy": [
+        "SEPP65",
+        "SPP7.3"
+      ],
+      "level": "building",
+      "variable": "resident_parking_2bed_ratio",
+      "operator": ">=",
+      "value": 1.0,
+      "unit": "spaces_per_2bed_apartment",
+      "scoring": {
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "resident_parking_3bed_2_spaces",
+      "design_element": "bicycle_car_parking",
+      "description": "Resident car parking 3-bed: 2 spaces per apartment",
+      "policy": [
+        "SEPP65",
+        "SPP7.3"
+      ],
+      "level": "building",
+      "variable": "resident_parking_3bed_ratio",
+      "operator": ">=",
+      "value": 2.0,
+      "unit": "spaces_per_3bed_apartment",
+      "scoring": {
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "bicycle_parking_resident_1_per_apartment",
+      "design_element": "bicycle_car_parking",
+      "description": "Resident bicycle parking: 1 space per apartment",
+      "policy": [
+        "SEPP65",
+        "SPP7.3"
+      ],
+      "level": "building",
+      "variable": "resident_bicycle_parking_ratio",
+      "operator": ">=",
+      "value": 1.0,
+      "unit": "spaces_per_apartment",
+      "scoring": {
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "bicycle_parking_visitor",
+      "design_element": "bicycle_car_parking",
+      "description": "Visitor bicycle parking provided",
+      "policy": [
+        "SEPP65",
+        "SPP7.3"
+      ],
+      "level": "building",
+      "variable": "has_visitor_bicycle_parking",
+      "operator": "==",
+      "value": 1,
+      "unit": "boolean",
+      "scoring": {
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "motorcycle_parking_provided",
+      "design_element": "bicycle_car_parking",
+      "description": "Motorcycle parking provided",
+      "policy": [
+        "SPP7.3"
+      ],
+      "level": "building",
+      "variable": "has_motorcycle_parking",
+      "operator": "==",
+      "value": 1,
+      "unit": "boolean",
+      "scoring": {
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "parking_space_accessible",
+      "design_element": "bicycle_car_parking",
+      "description": "Accessible parking space(s) provided",
+      "policy": [
+        "SPP7.3"
+      ],
+      "level": "building",
+      "variable": "has_accessible_parking",
+      "operator": "==",
+      "value": 1,
+      "unit": "boolean",
+      "scoring": {
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "car_share_spaces_provided",
+      "design_element": "bicycle_car_parking",
+      "description": "Car share spaces provided",
+      "policy": [
+        "SPP7.3"
+      ],
+      "level": "building",
+      "variable": "has_car_share_spaces",
+      "operator": "==",
+      "value": 1,
+      "unit": "boolean",
+      "scoring": {
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "apartment_mix_diversity",
+      "design_element": "apartment_mix",
+      "description": "Mix of apartment types in building",
+      "policy": [
+        "SEPP65"
+      ],
+      "level": "building",
+      "variable": "has_apartment_type_diversity",
+      "operator": "==",
+      "value": 1,
+      "unit": "boolean",
+      "scoring": {
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "ground_level_apartments_street_access",
+      "design_element": "apartment_mix",
+      "description": "Ground level apartments have direct street access",
+      "policy": [
+        "SEPP65",
+        "SPP7.3"
+      ],
+      "level": "apartment",
+      "variable": "ground_apartment_street_access",
+      "operator": "==",
+      "value": 1,
+      "unit": "boolean",
+      "applicability": {
+        "floor_level": 0
+      },
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "min_30pct_apartments_2plus_bedrooms",
+      "design_element": "apartment_mix",
+      "description": "At least 30% of apartments have 2+ bedrooms",
+      "policy": [
+        "SPP7.3"
+      ],
+      "level": "building",
+      "variable": "fraction_apartments_2plus_bedrooms",
+      "operator": ">=",
+      "value": 0.3,
+      "unit": "fraction",
+      "scoring": {
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "accessible_apartment_provided",
+      "design_element": "apartment_mix",
+      "description": "At least one accessible apartment provided",
+      "policy": [
+        "SPP7.3"
+      ],
+      "level": "building",
+      "variable": "has_accessible_apartment",
+      "operator": "==",
+      "value": 1,
+      "unit": "boolean",
+      "scoring": {
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "studio_min_width_3_3m",
+      "design_element": "indoor_space",
+      "description": "Studio minimum width 3.3 m",
+      "policy": [
+        "SEPP65"
+      ],
+      "level": "apartment",
+      "variable": "studio_min_width_m",
+      "operator": ">=",
+      "value": 3.3,
+      "unit": "m",
+      "applicability": {
+        "apartment_type": "studio"
+      },
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "habitable_room_min_width_3m",
+      "design_element": "indoor_space",
+      "description": "Habitable rooms minimum width 3 m",
+      "policy": [
+        "BADS"
+      ],
+      "level": "apartment",
+      "variable": "habitable_room_min_width_m",
+      "operator": ">=",
+      "value": 3.0,
+      "unit": "m",
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "kitchen_min_bench_length_2_4m",
+      "design_element": "indoor_space",
+      "description": "Kitchen minimum bench length 2.4 m",
+      "policy": [
+        "SPP7.3"
+      ],
+      "level": "apartment",
+      "variable": "kitchen_bench_length_m",
+      "operator": ">=",
+      "value": 2.4,
+      "unit": "m",
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "kitchen_min_bench_length_3_6m_2plus",
+      "design_element": "indoor_space",
+      "description": "Kitchen minimum bench length 3.6 m (2+ bedroom apartments)",
+      "policy": [
+        "SPP7.3"
+      ],
+      "level": "apartment",
+      "variable": "kitchen_bench_length_m",
+      "operator": ">=",
+      "value": 3.6,
+      "unit": "m",
+      "applicability": {
+        "bedrooms": {
+          ">=": 2
+        }
+      },
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "laundry_space_provided",
+      "design_element": "indoor_space",
+      "description": "Laundry space provided in apartment",
+      "policy": [
+        "SEPP65",
+        "SPP7.3"
+      ],
+      "level": "apartment",
+      "variable": "has_laundry_space",
+      "operator": "==",
+      "value": 1,
+      "unit": "boolean",
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "study_nook_min_1_2m_width",
+      "design_element": "indoor_space",
+      "description": "Study nook minimum 1.2 m width (if provided)",
+      "policy": [
+        "SPP7.3"
+      ],
+      "level": "apartment",
+      "variable": "study_nook_width_m",
+      "operator": ">=",
+      "value": 1.2,
+      "unit": "m",
+      "applicability": {
+        "has_study_nook": true
+      },
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "primary_bedroom_min_width_3m",
+      "design_element": "indoor_space",
+      "description": "Primary bedroom minimum width 3 m",
+      "policy": [
+        "BADS"
+      ],
+      "level": "apartment",
+      "variable": "primary_bedroom_min_width_m",
+      "operator": ">=",
+      "value": 3.0,
+      "unit": "m",
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "bathroom_min_dimension_accessible",
+      "design_element": "indoor_space",
+      "description": "Bathroom minimum dimension for accessibility",
+      "policy": [
+        "SPP7.3"
+      ],
+      "level": "apartment",
+      "variable": "bathroom_meets_accessible_dimensions",
+      "operator": "==",
+      "value": 1,
+      "unit": "boolean",
+      "applicability": {
+        "is_accessible_apartment": true
+      },
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "wardrobe_min_depth_0_6m",
+      "design_element": "indoor_space",
+      "description": "Wardrobe minimum depth 0.6 m",
+      "policy": [
+        "SPP7.3"
+      ],
+      "level": "apartment",
+      "variable": "wardrobe_min_depth_m",
+      "operator": ">=",
+      "value": 0.6,
+      "unit": "m",
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "private_open_space_solar_access_2h",
+      "design_element": "private_open_space",
+      "description": "Private open space receives 2h direct sunlight mid-winter",
+      "policy": [
+        "SPP7.3",
+        "BADS"
+      ],
+      "level": "apartment",
+      "variable": "private_open_space_solar_hours_midwinter",
+      "operator": ">=",
+      "value": 2.0,
+      "unit": "hours",
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "aggregate": "mean"
+        }
+      }
+    },
+    {
+      "id": "living_room_solar_access_3h_winter",
+      "design_element": "solar_daylight_access",
+      "description": "Living room receives at least 3 hours direct sunlight mid-winter",
+      "policy": [
+        "SEPP65"
+      ],
+      "level": "apartment",
+      "variable": "living_room_solar_hours_midwinter",
+      "operator": ">=",
+      "value": 3.0,
+      "unit": "hours",
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "aggregate": "mean"
+        }
+      }
+    },
+    {
+      "id": "winter_sunlight_9am_3pm_measured",
+      "design_element": "solar_daylight_access",
+      "description": "Winter sunlight measured between 9am-3pm on June 21",
+      "policy": [
+        "SEPP65",
+        "SPP7.3"
+      ],
+      "level": "apartment",
+      "variable": "solar_analysis_complies_with_method",
+      "operator": "==",
+      "value": 1,
+      "unit": "boolean",
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "snorkel_bedroom_dimension_1m",
+      "design_element": "solar_daylight_access",
+      "description": "Snorkel bedroom: light well minimum dimension 1 m",
+      "policy": [
+        "BADS"
+      ],
+      "level": "apartment",
+      "variable": "snorkel_light_well_min_dimension_m",
+      "operator": ">=",
+      "value": 1.0,
+      "unit": "m",
+      "applicability": {
+        "has_snorkel_bedroom": true
+      },
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "snorkel_bedroom_max_3m_depth",
+      "design_element": "solar_daylight_access",
+      "description": "Snorkel bedroom: maximum 3m from window to furthest point",
+      "policy": [
+        "BADS"
+      ],
+      "level": "apartment",
+      "variable": "snorkel_bedroom_max_depth_m",
+      "operator": "<=",
+      "value": 3.0,
+      "unit": "m",
+      "applicability": {
+        "has_snorkel_bedroom": true
+      },
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "cross_ventilation_apartment_depth_18m",
+      "design_element": "natural_ventilation",
+      "description": "Apartments with cross ventilation: maximum depth 18m",
+      "policy": [
+        "SPP7.3"
+      ],
+      "level": "apartment",
+      "variable": "apartment_depth_m",
+      "operator": "<=",
+      "value": 18.0,
+      "unit": "m",
+      "applicability": {
+        "has_cross_ventilation": true
+      },
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "ceiling_fan_provision",
+      "design_element": "natural_ventilation",
+      "description": "Ceiling fan provision in living areas (where mechanical ventilation insufficient)",
+      "policy": [
+        "SPP7.3"
+      ],
+      "level": "apartment",
+      "variable": "has_ceiling_fan_provision",
+      "operator": "==",
+      "value": 1,
+      "unit": "boolean",
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "ventilation_opposite_facades",
+      "design_element": "natural_ventilation",
+      "description": "Natural ventilation from opposite facades or adjacent facades 90\u00b0 apart",
+      "policy": [
+        "BADS"
+      ],
+      "level": "apartment",
+      "variable": "ventilation_from_opposite_or_perpendicular",
+      "operator": "==",
+      "value": 1,
+      "unit": "boolean",
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "bedroom_clear_space_furniture",
+      "design_element": "indoor_space",
+      "description": "Bedroom has clear space for furniture layout",
+      "policy": [
+        "SPP7.3"
+      ],
+      "level": "apartment",
+      "variable": "bedroom_has_furniture_clearance",
+      "operator": "==",
+      "value": 1,
+      "unit": "boolean",
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "living_dining_separate_zones",
+      "design_element": "indoor_space",
+      "description": "Living and dining areas are separate or clearly defined zones",
+      "policy": [
+        "SEPP65"
+      ],
+      "level": "apartment",
+      "variable": "living_dining_separate_or_defined",
+      "operator": "==",
+      "value": 1,
+      "unit": "boolean",
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "kitchen_workspace_1_5m",
+      "design_element": "indoor_space",
+      "description": "Kitchen minimum workspace 1.5 m",
+      "policy": [
+        "SPP7.3"
+      ],
+      "level": "apartment",
+      "variable": "kitchen_workspace_length_m",
+      "operator": ">=",
+      "value": 1.5,
+      "unit": "m",
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "kitchen_clearance_0_9m",
+      "design_element": "indoor_space",
+      "description": "Kitchen clearance minimum 0.9 m",
+      "policy": [
+        "SPP7.3"
+      ],
+      "level": "apartment",
+      "variable": "kitchen_clearance_m",
+      "operator": ">=",
+      "value": 0.9,
+      "unit": "m",
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "accessible_apartment_min_65m2",
+      "design_element": "indoor_space",
+      "description": "Accessible apartment minimum 65 m\u00b2",
+      "policy": [
+        "SPP7.3"
+      ],
+      "level": "apartment",
+      "variable": "internal_area_m2",
+      "operator": ">=",
+      "value": 65.0,
+      "unit": "m2",
+      "applicability": {
+        "is_accessible_apartment": true
+      },
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "entry_foyer_min_area",
+      "design_element": "indoor_space",
+      "description": "Entry foyer minimum area for circulation",
+      "policy": [
+        "SPP7.3"
+      ],
+      "level": "apartment",
+      "variable": "entry_foyer_has_min_area",
+      "operator": "==",
+      "value": 1,
+      "unit": "boolean",
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "balcony_integrated_with_living",
+      "design_element": "private_open_space",
+      "description": "Balcony integrated with living area",
+      "policy": [
+        "SEPP65",
+        "SPP7.3"
+      ],
+      "level": "apartment",
+      "variable": "balcony_integrated_with_living",
+      "operator": "==",
+      "value": 1,
+      "unit": "boolean",
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "winter_sun_private_open_space",
+      "design_element": "private_open_space",
+      "description": "Private open space designed to capture winter sun",
+      "policy": [
+        "SEPP65"
+      ],
+      "level": "apartment",
+      "variable": "private_open_space_captures_winter_sun",
+      "operator": "==",
+      "value": 1,
+      "unit": "boolean",
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "balcony_min_area_habitable",
+      "design_element": "private_open_space",
+      "description": "Balcony minimum habitable area (excludes services/storage)",
+      "policy": [
+        "BADS"
+      ],
+      "level": "apartment",
+      "variable": "balcony_habitable_area_m2",
+      "operator": ">=",
+      "value": 8.0,
+      "unit": "m2",
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "communal_space_overlooked_safety",
+      "design_element": "communal_spaces",
+      "description": "Communal space overlooked for safety and passive surveillance",
+      "policy": [
+        "SEPP65",
+        "SPP7.3"
+      ],
+      "level": "building",
+      "variable": "communal_space_has_passive_surveillance",
+      "operator": "==",
+      "value": 1,
+      "unit": "boolean",
+      "scoring": {
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "communal_space_variety_settings",
+      "design_element": "communal_spaces",
+      "description": "Communal space provides variety of settings (active/passive)",
+      "policy": [
+        "SPP7.3"
+      ],
+      "level": "building",
+      "variable": "communal_space_has_variety",
+      "operator": "==",
+      "value": 1,
+      "unit": "boolean",
+      "scoring": {
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "lift_accessible_all_floors",
+      "design_element": "circulation_spaces",
+      "description": "Lift provides accessible access to all floors",
+      "policy": [
+        "SPP7.3"
+      ],
+      "level": "building",
+      "variable": "lift_accessible_all_floors",
+      "operator": "==",
+      "value": 1,
+      "unit": "boolean",
+      "scoring": {
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "corridor_natural_light_ventilation",
+      "design_element": "circulation_spaces",
+      "description": "Corridors have natural light and ventilation",
+      "policy": [
+        "SEPP65",
+        "SPP7.3"
+      ],
+      "level": "floor",
+      "variable": "corridor_has_natural_light_ventilation",
+      "operator": "==",
+      "value": 1,
+      "unit": "boolean",
+      "scoring": {
+        "apartment": {
+          "inherited_from_floor": true
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "noise_sensitive_not_adjacent_commercial",
+      "design_element": "acoustic_privacy",
+      "description": "Noise-sensitive rooms not adjacent to commercial/retail uses",
+      "policy": [
+        "SPP7.3"
+      ],
+      "level": "apartment",
+      "variable": "noise_sensitive_separated_from_commercial",
+      "operator": "==",
+      "value": 1,
+      "unit": "boolean",
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    },
+    {
+      "id": "balcony_privacy_screening_adjacent",
+      "design_element": "outlook_visual_privacy",
+      "description": "Balcony privacy screening between adjacent balconies",
+      "policy": [
+        "SPP7.3"
+      ],
+      "level": "apartment",
+      "variable": "balcony_has_privacy_screening",
+      "operator": "==",
+      "value": 1,
+      "unit": "boolean",
+      "scoring": {
+        "apartment": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        },
+        "building": {
+          "if_met": 1.0,
+          "if_not": 0.0
+        }
+      }
+    }
+  ]
+}

@@ -19,7 +19,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
 
   if (!ready) {
     return (
-      <div className="flex h-full items-center justify-center bg-slate-100 text-sm text-slate-500">
+      <div className="hl-workbench flex h-full items-center justify-center text-sm text-slate-500">
         Loading…
       </div>
     );
@@ -27,7 +27,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
 
   if (!user) {
     return (
-      <div className="flex h-full items-center justify-center bg-slate-100 text-sm text-slate-500">
+      <div className="hl-workbench flex h-full items-center justify-center text-sm text-slate-500">
         Redirecting to sign in…
       </div>
     );

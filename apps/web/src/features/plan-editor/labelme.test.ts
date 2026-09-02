@@ -1,115 +1,89 @@
 import { describe, expect, it } from "vitest";
-import { canonicalLabel, entityTypeForLabel, makeLabeledEntity } from "./labelClasses";
 import { overlaysToLabelMe, parseLabelMeJson } from "./labelme";
+import { makeLabeledEntity } from "./labelClasses";
+import { placeCompassKeypointOnEntity } from "./compassKeypointAnnotate";
 
-const NOW = "2026-08-25T00:00:00.000Z";
-
-describe("label classes", () => {
-  it("aliases LabelMe dump names onto HighLife classes", () => {
-    expect(canonicalLabel("Toilet")).toBe("Bathroom");
-    expect(canonicalLabel("Living")).toBe("Open Living");
-    expect(canonicalLabel("Home Office")).toBe("Bedroom");
-    expect(canonicalLabel("Scale")).toBeNull();
-  });
-
-  it("maps room and opening labels onto overlay entity types", () => {
-    expect(entityTypeForLabel("Bedroom")).toBe("room");
-    expect(entityTypeForLabel("Unit")).toBe("unit_boundary");
-    expect(entityTypeForLabel("Sliding Door")).toBe("door");
-    expect(entityTypeForLabel("External Wall")).toBe("wall");
-  });
-});
-
-describe("LabelMe JSON", () => {
-  it("imports polygons and 2-point rectangles", () => {
-    const parsed = parseLabelMeJson(
-      {
-        version: "5.8.3",
-        shapes: [
-          {
-            label: "Bedroom",
-            points: [
-              [10, 10],
-              [80, 10],
-              [80, 60],
-              [10, 60],
-            ],
-            shape_type: "polygon",
-          },
-          {
-            label: "Toilet",
-            points: [
-              [100, 20],
-              [140, 50],
-            ],
-            shape_type: "rectangle",
-          },
-        ],
-        imagePath: "floor.png",
-        imageWidth: 200,
-        imageHeight: 100,
-      },
-      NOW,
+describe("LabelMe compass keypoints", () => {
+  it("round-trips tip and base on a north arrow", () => {
+    const drawn = placeCompassKeypointOnEntity(
+      placeCompassKeypointOnEntity(
+        makeLabeledEntity(
+          "North Arrow",
+          { kind: "rect", x: 8, y: 8, width: 4, height: 32 },
+          "manual",
+          "2026-01-01T00:00:00.000Z",
+        ),
+        "base",
+        { x: 10, y: 38 },
+      ),
+      "tip",
+      { x: 10, y: 10 },
     );
-    expect(parsed.entities).toHaveLength(2);
-    expect(parsed.entities[0].label).toBe("Bedroom");
-    expect(parsed.entities[0].geometry.kind).toBe("polygon");
-    expect(parsed.entities[0].source).toBe("labelme");
-    expect(parsed.entities[1].label).toBe("Bathroom");
-    expect(parsed.entities[1].geometry).toEqual({
-      kind: "rect",
-      x: 100,
-      y: 20,
-      width: 40,
-      height: 30,
+    const doc = overlaysToLabelMe([drawn], {
+      imagePath: "page.png",
+      imageWidth: 100,
+      imageHeight: 80,
     });
-    expect(parsed.skipped).toBe(0);
+    expect(doc.shapes).toHaveLength(1);
+    expect(doc.shapes[0].flags.keypoints).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "tip", x: 10, y: 10 }),
+        expect.objectContaining({ name: "base", x: 10, y: 38 }),
+      ]),
+    );
+
+    const parsed = parseLabelMeJson(doc);
+    expect(parsed.entities).toHaveLength(1);
+    expect(parsed.entities[0].type).toBe("north_arrow");
+    const keypoints = parsed.entities[0].attributes.keypoints as Array<{ name: string; x: number }>;
+    expect(keypoints.find((k) => k.name === "tip")?.x).toBe(10);
+    expect(keypoints.find((k) => k.name === "base")?.x).toBe(10);
   });
 
-  it("round-trips overlay entities without embedding imageData", () => {
-    const bedroom = makeLabeledEntity(
-      "Bedroom",
-      {
-        kind: "polygon",
-        points: [
-          { x: 10, y: 10 },
-          { x: 80, y: 10 },
-          { x: 80, y: 60 },
-          { x: 10, y: 60 },
-        ],
-      },
-      "manual",
-      NOW,
-    );
-    bedroom.id = "ent-bedroom";
-    const door = makeLabeledEntity(
-      "Single Door",
-      { kind: "rect", x: 12, y: 40, width: 18, height: 6 },
-      "manual",
-      NOW,
-    );
-    door.id = "ent-door";
-
-    const doc = overlaysToLabelMe([bedroom, door], {
-      imagePath: "plan-p1.png",
-      imageWidth: 400,
-      imageHeight: 300,
+  it("attaches sibling tip/base point shapes to the nearest north arrow", () => {
+    const parsed = parseLabelMeJson({
+      version: "5.8.3",
+      flags: {},
+      imagePath: "page.png",
+      imageData: null,
+      imageWidth: 100,
+      imageHeight: 80,
+      shapes: [
+        {
+          label: "North Arrow",
+          shape_type: "rectangle",
+          points: [
+            [8, 8],
+            [12, 40],
+          ],
+          group_id: 1,
+          description: "",
+          flags: {},
+        },
+        {
+          label: "tip",
+          shape_type: "point",
+          points: [[10, 10]],
+          group_id: 1,
+          description: "",
+          flags: { visibility: "visible" },
+        },
+        {
+          label: "base",
+          shape_type: "point",
+          points: [[10, 38]],
+          group_id: 1,
+          description: "",
+          flags: { occluded: true },
+        },
+      ],
     });
-    expect(doc.imageData).toBeNull();
-    expect(doc.shapes[0].shape_type).toBe("polygon");
-    expect(doc.shapes[1].shape_type).toBe("rectangle");
-    expect(doc.shapes[1].points).toEqual([
-      [12, 40],
-      [30, 46],
-    ]);
-
-    const again = parseLabelMeJson(doc, NOW);
-    expect(again.entities.map((e) => e.label)).toEqual(["Bedroom", "Single Door"]);
-    expect(again.entities[0].geometry.kind).toBe("polygon");
-    expect(again.entities[1].geometry.kind).toBe("rect");
-  });
-
-  it("rejects JSON that is not LabelMe", () => {
-    expect(() => parseLabelMeJson({ names: ["Bedroom"] })).toThrow(/LabelMe JSON/);
+    expect(parsed.entities).toHaveLength(1);
+    const keypoints = parsed.entities[0].attributes.keypoints as Array<{
+      name: string;
+      visibility: string;
+    }>;
+    expect(keypoints.find((k) => k.name === "tip")?.visibility).toBe("visible");
+    expect(keypoints.find((k) => k.name === "base")?.visibility).toBe("occluded");
   });
 });

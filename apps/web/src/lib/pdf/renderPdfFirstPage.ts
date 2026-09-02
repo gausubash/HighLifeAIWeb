@@ -11,6 +11,7 @@ import {
   type PdfGraphicsInfo,
 } from "./classifyPdfGraphics";
 import { normalizeRotation, type PageRotationDeg } from "./pageRotation";
+import { PDFJS_WORKER_SRC, pdfjsGetDocumentParams } from "./pdfjsDocument";
 
 export const PDF_RENDER_DPI = 300;
 /** pdf.js viewport scale for 300 DPI: dpi / 72 */
@@ -26,6 +27,20 @@ export function clampPdfUploadDpi(dpi: number): number {
 
 export function pdfRenderScale(dpi: number): number {
   return clampPdfUploadDpi(dpi) / 72;
+}
+
+/** Estimate the raster DPI used when the PDF page was converted to a PNG. */
+export function inferRenderDpi(
+  widthPx: number,
+  heightPx: number,
+  pageWidthPt: number,
+  pageHeightPt: number,
+): number {
+  const sx = pageWidthPt > 0 ? widthPx / pageWidthPt : 0;
+  const sy = pageHeightPt > 0 ? heightPx / pageHeightPt : 0;
+  const scalePt = sx > 0 && sy > 0 ? (sx + sy) / 2 : sx || sy;
+  if (!(scalePt > 0)) return PDF_RENDER_DPI;
+  return clampPdfUploadDpi(scalePt * 72);
 }
 
 export type RenderedPdfPage = {
@@ -81,8 +96,7 @@ type PageLike = {
 
 async function ensurePdfJsWorkerConfigured(pdfjsLib: PdfjsLibLike): Promise<void> {
   if (workerConfigured) return;
-  pdfjsLib.GlobalWorkerOptions.workerSrc =
-    "https://unpkg.com/pdfjs-dist@6.2.108/legacy/build/pdf.worker.min.mjs";
+  pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_SRC;
   workerConfigured = true;
 }
 
@@ -90,7 +104,7 @@ async function loadPdf(file: File): Promise<{ doc: PdfDocLike; ops: Record<strin
   const arrayBuffer = await file.arrayBuffer();
   const pdfjsLib = (await import("pdfjs-dist/legacy/build/pdf.mjs")) as unknown as PdfjsLibLike;
   await ensurePdfJsWorkerConfigured(pdfjsLib);
-  const doc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  const doc = await pdfjsLib.getDocument(pdfjsGetDocumentParams(arrayBuffer)).promise;
   return { doc, ops: pdfjsLib.OPS ?? {} };
 }
 
@@ -158,18 +172,19 @@ export async function renderAllPdfPagesToPng(
   opts?: {
     dpi?: number;
     rotation?: PageRotationDeg;
+    rotationForPage?: (pageNumber: number) => PageRotationDeg;
     onProgress?: (done: number, total: number) => void;
   },
 ): Promise<RenderedPdfPage[]> {
   const dpi = opts?.dpi ?? PDF_RENDER_DPI;
   const scale = dpi / 72;
-  const rotation = opts?.rotation ?? 0;
   const { doc, ops } = await loadPdf(file);
   const total = doc.numPages;
   const pages: RenderedPdfPage[] = [];
 
   for (let i = 1; i <= total; i++) {
     const page = await doc.getPage(i);
+    const rotation = opts?.rotationForPage?.(i) ?? opts?.rotation ?? 0;
     pages.push(await renderSinglePage(page, i, scale, dpi, ops, rotation));
     opts?.onProgress?.(i, total);
   }

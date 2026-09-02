@@ -10,6 +10,8 @@ import {
   canonicalScaleText,
   pixelDistance,
   pixelsPerMeterFromScaleAndPaper,
+  previewPixelsPerMeterFromScalePaperDpi,
+  scaleMethodLabel,
 } from "@/lib/scale/parseScale";
 
 describe("parseScaleAndPaper", () => {
@@ -257,6 +259,63 @@ describe("calibrateFromScaleAndPaper", () => {
     expect(next.scaleRatio).toBe(200);
     expect(next.paper).toBe("A3");
     expect(next.pixelsPerMeter).toBeCloseTo(ppm, 5);
+  });
+});
+
+describe("previewPixelsPerMeterFromScalePaperDpi", () => {
+  it("matches raster calibration when DPI is unchanged", () => {
+    const ppm = previewPixelsPerMeterFromScalePaperDpi({
+      scaleRatio: 200,
+      paper: "A3",
+      dpi: 300,
+      renderWidthPx: 4200,
+      renderHeightPx: 2970,
+      renderDpi: 300,
+    });
+    expect(ppm).toBeCloseTo(4200 / 84, 5);
+  });
+
+  it("scales px/m with DPI and paper", () => {
+    const at300 = previewPixelsPerMeterFromScalePaperDpi({
+      scaleRatio: 100,
+      paper: "A4",
+      dpi: 300,
+    });
+    const at600 = previewPixelsPerMeterFromScalePaperDpi({
+      scaleRatio: 100,
+      paper: "A4",
+      dpi: 600,
+    });
+    const a3 = previewPixelsPerMeterFromScalePaperDpi({
+      scaleRatio: 100,
+      paper: "A3",
+      dpi: 300,
+    });
+    expect(at300).not.toBeNull();
+    expect(at600).toBeCloseTo((at300 as number) * 2, 5);
+    expect(a3).not.toBeNull();
+    expect(a3).toBeLessThan(at300 as number);
+  });
+
+  it("returns null without a valid 1:N", () => {
+    expect(
+      previewPixelsPerMeterFromScalePaperDpi({
+        scaleRatio: 0,
+        paper: "A4",
+        dpi: 300,
+      }),
+    ).toBeNull();
+  });
+});
+
+describe("scaleMethodLabel", () => {
+  it("maps known methods to short sidebar labels", () => {
+    expect(scaleMethodLabel("paper_size_auto")).toBe("Auto");
+    expect(scaleMethodLabel("ocr_scale")).toBe("OCR");
+    expect(scaleMethodLabel("title_block_text")).toBe("OCR");
+    expect(scaleMethodLabel("auto_detect_scale")).toBe("OCR");
+    expect(scaleMethodLabel("manual_scale_paper")).toBe("Manual");
+    expect(scaleMethodLabel("manual_two_point")).toBe("Measure");
   });
 });
 

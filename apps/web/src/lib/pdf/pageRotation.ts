@@ -15,6 +15,31 @@ export function normalizeRotation(value: number): PageRotationDeg {
   return 0;
 }
 
+export function asPageRotation(value: unknown): PageRotationDeg | null {
+  if (value === 0 || value === 90 || value === 180 || value === 270) return value;
+  return null;
+}
+
+/**
+ * Viewer turn applied after the PDF page /Rotate flag.
+ * Prefer the stored value; if missing, infer a 90° CW swap when the raster
+ * orientation no longer matches the PDF page.
+ */
+export function inferViewerRotation(args: {
+  stored?: unknown;
+  pdfWidth: number;
+  pdfHeight: number;
+  pageWidthPx: number;
+  pageHeightPx: number;
+}): PageRotationDeg {
+  const stored = asPageRotation(args.stored);
+  if (stored != null) return stored;
+  const pdfLandscape = args.pdfWidth > args.pdfHeight + 1;
+  const pageLandscape = args.pageWidthPx > args.pageHeightPx + 1;
+  if (pdfLandscape === pageLandscape) return 0;
+  return 90;
+}
+
 export function rotatedSize(
   width: number,
   height: number,
@@ -83,6 +108,42 @@ export function rotateOverlayEntity(
   return {
     ...entity,
     geometry: rotateGeometry(entity.geometry, width, height, deg),
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+export function scaleGeometry(
+  geometry: OverlayGeometry,
+  scaleX: number,
+  scaleY: number,
+): OverlayGeometry {
+  if (geometry.kind === "point") {
+    return { kind: "point", x: geometry.x * scaleX, y: geometry.y * scaleY };
+  }
+  if (geometry.kind === "rect") {
+    return {
+      kind: "rect",
+      x: geometry.x * scaleX,
+      y: geometry.y * scaleY,
+      width: geometry.width * scaleX,
+      height: geometry.height * scaleY,
+    };
+  }
+  return {
+    ...geometry,
+    points: geometry.points.map((p) => ({ x: p.x * scaleX, y: p.y * scaleY })),
+  };
+}
+
+export function scaleOverlayEntity(
+  entity: OverlayEntity,
+  scaleX: number,
+  scaleY: number,
+): OverlayEntity {
+  if (scaleX === 1 && scaleY === 1) return entity;
+  return {
+    ...entity,
+    geometry: scaleGeometry(entity.geometry, scaleX, scaleY),
     updatedAt: new Date().toISOString(),
   };
 }

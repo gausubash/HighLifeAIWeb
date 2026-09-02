@@ -8,6 +8,16 @@ export type OcrLine = {
   bbox?: [number, number][] | null;
 };
 
+export type NormalizedCrop = { x: number; y: number; width: number; height: number };
+
+export type OcrFrame = {
+  layoutCrop: NormalizedCrop;
+  ocrWidthPx: number;
+  ocrHeightPx: number;
+  pageWidthPx: number;
+  pageHeightPx: number;
+};
+
 export type SheetOcrMeta = {
   sheetType?: string;
   title?: string | null;
@@ -28,6 +38,8 @@ export type SheetOcrMeta = {
     tileSize?: number;
     overlap?: number;
   };
+  ocrFrame?: OcrFrame;
+  coordSpace?: "crop" | "page";
 };
 
 export type PageOcrResponse = {
@@ -81,16 +93,25 @@ export function scaleSheetOcrMeta(
   if (Math.abs(sx - 1) < 1e-6 && Math.abs(sy - 1) < 1e-6) {
     return sheet;
   }
+  if (sheet.coordSpace === "crop") {
+    return {
+      ...sheet,
+      ocrFrame: sheet.ocrFrame
+        ? { ...sheet.ocrFrame, pageWidthPx: toWidthPx, pageHeightPx: toHeightPx }
+        : sheet.ocrFrame,
+    };
+  }
   return {
     ...sheet,
+    ocrFrame: sheet.ocrFrame
+      ? { ...sheet.ocrFrame, pageWidthPx: toWidthPx, pageHeightPx: toHeightPx }
+      : sheet.ocrFrame,
     lines: (sheet.lines ?? []).map((line) => ({
       ...line,
       bbox: line.bbox?.map(([x, y]) => [x * sx, y * sy] as [number, number]) ?? line.bbox,
     })),
   };
 }
-
-export type NormalizedCrop = { x: number; y: number; width: number; height: number };
 
 export type PaddleOcrBackend = "classic" | "vl";
 
@@ -109,10 +130,14 @@ export type PaddleOcrOptions = {
   pipelineVersion?: PaddleOcrPipelineVersion;
   useLayoutDetection?: boolean;
   vlMaxSide?: number;
+  /** Classic PP-OCR only. Title-block crops default off (one pass). */
+  tileTitleBlock?: boolean;
+  /** Classic PP-OCR only. Drawing-area crops default off (one pass). */
+  tileDrawing?: boolean;
 };
 
 export const DEFAULT_PADDLE_OCR_OPTIONS: PaddleOcrOptions = {
-  useDocOrientationClassify: true,
+  useDocOrientationClassify: false,
   useDocUnwarping: false,
   useTextlineOrientation: true,
   textRecScoreThresh: 0.5,
@@ -124,6 +149,8 @@ export const DEFAULT_PADDLE_OCR_OPTIONS: PaddleOcrOptions = {
   pipelineVersion: "v1",
   useLayoutDetection: false,
   vlMaxSide: 2048,
+  tileTitleBlock: false,
+  tileDrawing: false,
 };
 
 function appendOcrOptionsToForm(form: FormData, options?: PaddleOcrOptions) {
@@ -163,6 +190,12 @@ function appendOcrOptionsToForm(form: FormData, options?: PaddleOcrOptions) {
   }
   if (options.vlMaxSide !== undefined) {
     form.append("vl_max_side", String(options.vlMaxSide));
+  }
+  if (options.tileTitleBlock !== undefined) {
+    form.append("tile_title_block", String(options.tileTitleBlock));
+  }
+  if (options.tileDrawing !== undefined) {
+    form.append("tile_drawing", String(options.tileDrawing));
   }
 }
 

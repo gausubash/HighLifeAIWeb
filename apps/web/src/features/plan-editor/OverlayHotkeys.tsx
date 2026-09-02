@@ -7,10 +7,16 @@ export function OverlayHotkeys({
   enabled,
   allowDraw = false,
   layoutEditMode = false,
+  keepSelectOnEscape = false,
+  compassKeypoints = false,
+  onSave,
 }: {
   enabled: boolean;
   allowDraw?: boolean;
   layoutEditMode?: boolean;
+  keepSelectOnEscape?: boolean;
+  compassKeypoints?: boolean;
+  onSave?: () => void;
 }) {
   const undo = useOverlayStore((s) => s.undo);
   const redo = useOverlayStore((s) => s.redo);
@@ -18,7 +24,9 @@ export function OverlayHotkeys({
   const cancelDraft = useOverlayStore((s) => s.cancelDraft);
   const commitDraft = useOverlayStore((s) => s.commitDraft);
   const clearSelection = useOverlayStore((s) => s.clearSelection);
+  const selectAll = useOverlayStore((s) => s.selectAll);
   const setTool = useOverlayStore((s) => s.setTool);
+  const setCompassPlace = useOverlayStore((s) => s.setCompassPlace);
 
   useEffect(() => {
     if (!enabled) return;
@@ -30,6 +38,11 @@ export function OverlayHotkeys({
       if (typing) return;
 
       const mod = e.ctrlKey || e.metaKey;
+      if (mod && e.key.toLowerCase() === "s") {
+        e.preventDefault();
+        onSave?.();
+        return;
+      }
       if (mod && e.key.toLowerCase() === "z") {
         e.preventDefault();
         if (e.shiftKey) redo();
@@ -45,12 +58,12 @@ export function OverlayHotkeys({
         e.preventDefault();
         cancelDraft();
         clearSelection();
-        if (!layoutEditMode) setTool("pan");
+        setTool("select");
         return;
       }
       if (e.key === "Enter") {
         const draft = useOverlayStore.getState().draft;
-        if (draft && draft.tool !== "move" && draft.tool !== "rect") {
+        if (draft && draft.tool !== "move" && draft.tool !== "rect" && draft.tool !== "move-keypoint") {
           e.preventDefault();
           commitDraft();
         }
@@ -71,9 +84,29 @@ export function OverlayHotkeys({
         setTool("polygon");
         return;
       }
+      if (compassKeypoints && e.key.toLowerCase() === "t") {
+        e.preventDefault();
+        setCompassPlace("tip");
+        return;
+      }
+      if (compassKeypoints && e.key.toLowerCase() === "b") {
+        e.preventDefault();
+        setCompassPlace("base");
+        return;
+      }
+      if (mod && e.key.toLowerCase() === "a") {
+        e.preventDefault();
+        selectAll();
+        return;
+      }
       if (e.key.toLowerCase() === "v") {
         e.preventDefault();
         setTool("select");
+        return;
+      }
+      if (e.key.toLowerCase() === "m") {
+        e.preventDefault();
+        setTool("marquee");
         return;
       }
       if (e.key.toLowerCase() === "h") {
@@ -83,7 +116,7 @@ export function OverlayHotkeys({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [enabled, allowDraw, layoutEditMode, undo, redo, deleteSelected, cancelDraft, commitDraft, clearSelection, setTool]);
+  }, [enabled, allowDraw, compassKeypoints, keepSelectOnEscape, layoutEditMode, onSave, undo, redo, deleteSelected, cancelDraft, commitDraft, clearSelection, selectAll, setTool, setCompassPlace]);
 
   return null;
 }

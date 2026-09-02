@@ -38,14 +38,14 @@ export function LandingPage() {
 
   return (
     <div className="min-h-dvh bg-[var(--hl-paper)] text-[var(--hl-ink)]">
-      <header className="absolute inset-x-0 top-0 z-20">
-        <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-5 sm:px-8">
-          <span className="font-display text-xl font-semibold tracking-tight text-white">
+      <header className="absolute inset-x-0 top-0 z-20 p-2 sm:px-5">
+        <div className="mx-auto flex h-12 max-w-6xl items-center justify-between px-4">
+          <span className="font-display text-lg font-semibold tracking-tight text-white">
             HighLife
           </span>
           <Link
             href={primaryHref}
-            className="rounded-md bg-white/95 px-3.5 py-1.5 text-sm font-medium text-[var(--hl-moss-deep)] transition hover:bg-white"
+            className="rounded bg-[var(--hl-moss)] px-3.5 py-1.5 text-sm font-medium text-white transition hover:bg-[var(--hl-moss-deep)]"
           >
             {primaryLabel}
           </Link>
@@ -115,7 +115,7 @@ export function LandingPage() {
                 body: "Shorter timelines mean fewer redesign loops, lower holding costs, and earlier starts on site.",
               },
             ].map((item) => (
-              <li key={item.title} className="border-t border-[var(--hl-line)] pt-5">
+              <li key={item.title} className="hl-block p-5">
                 <h3 className="font-display text-xl font-semibold">{item.title}</h3>
                 <p className="mt-2 text-sm leading-relaxed text-slate-600">{item.body}</p>
               </li>
@@ -155,7 +155,7 @@ export function LandingPage() {
                 body: "Catch issues early so projects spend less time looping between design and approval.",
               },
             ].map((item) => (
-              <li key={item.title} className="border-t border-[var(--hl-line)] pt-5">
+              <li key={item.title} className="hl-block p-5">
                 <h3 className="font-display text-lg font-semibold">{item.title}</h3>
                 <p className="mt-2 text-sm leading-relaxed text-slate-600">{item.body}</p>
               </li>
@@ -190,7 +190,7 @@ export function LandingPage() {
               body: "Designers fix issues with clause-referenced feedback. Assessors get a clear compliance report.",
             },
           ].map((item) => (
-            <li key={item.step} className="border-t border-[var(--hl-line)] pt-5">
+            <li key={item.step} className="hl-block p-5">
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--hl-moss)]">
                 {item.step}
               </p>
@@ -222,7 +222,7 @@ export function LandingPage() {
                 body: "Shorter approval timelines, lower holding costs and risk, and faster time to construction and sales.",
               },
             ].map((item) => (
-              <div key={item.title} className="border-t border-[var(--hl-line)] pt-5">
+              <div key={item.title} className="hl-block p-5">
                 <h3 className="font-display text-xl font-semibold">{item.title}</h3>
                 <p className="mt-2 text-sm leading-relaxed text-slate-600">{item.body}</p>
               </div>

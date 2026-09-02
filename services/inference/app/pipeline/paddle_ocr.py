@@ -18,6 +18,7 @@ import numpy as np
 from PIL import Image
 
 from app.config import Settings, get_settings
+from app.pipeline.paddle_ocr_tiling import OcrCancelled
 from app.pipeline.scale_converter import (
     format_scale_declaration,
     normalize_ocr_scale_text,
@@ -72,8 +73,9 @@ ORDINAL_LABEL = {
     "12th": "Twelfth Floor",
 }
 UNIT_RE = re.compile(
-    r"(?i)\b(?:unit|apt|apartment|dwelling|tenancy|flat|suite)\s*[#.:-]?\s*([A-Z0-9]{1,8})\b",
+    r"(?i)\b(?:unit|apt|apartment|dwelling|tenancy|flat|suite)\s*(?:no\.?|nos\.?|number|#)?\s*[.:-]?\s*([A-Z0-9]{1,8})\b",
 )
+UNIT_U_RE = re.compile(r"(?i)\bU\s*[-#.]?\s*(\d{1,4}[A-Z]?)\b")
 UNIT_ID_STOPWORDS = {
     "PLAN",
     "TYPE",
@@ -90,6 +92,11 @@ UNIT_ID_STOPWORDS = {
     "INDEX",
     "LIST",
     "TABLE",
+    "EN",
+    "ENT",
+    "ENS",
+    "CT",
+    "WC",
 }
 TITLE_CUES = ("floor plan", "unit plan", "general arrangement", "ga plan", "rcp", "reflected ceiling")
 ROOM_LABEL_RE = re.compile(
@@ -335,6 +342,36 @@ def _kill_ocr_worker() -> None:
 
 atexit.register(_kill_ocr_worker)
 
+# Windows Ctrl+C exit (STATUS_CONTROL_C_EXIT). Unix SIGINT is 130 / -2.
+_WIN_STATUS_CONTROL_C_EXIT = 3221225786
+_OCR_INTERRUPT_HINT = (
+    "PaddleOCR was interrupted before it finished (KeyboardInterrupt). "
+    "This usually means the inference server reloaded or received Ctrl+C. "
+    "Run OCR again, and avoid uvicorn --reload while a job is running."
+)
+
+
+def ocr_worker_popen_kwargs() -> dict[str, Any]:
+    """Keep uvicorn Ctrl+C / --reload from broadcasting SIGINT into the OCR child."""
+    if os.name == "nt":
+        return {"creationflags": getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)}
+    return {"start_new_session": True}
+
+
+def ocr_worker_exit_error(logs: list[str], exit_code: int | None) -> str:
+    """Turn a silent worker death into a message the UI can show."""
+    detail = "\n".join(logs[-15:]).strip()
+    interrupted = "KeyboardInterrupt" in detail or exit_code in {
+        130,
+        -2,
+        _WIN_STATUS_CONTROL_C_EXIT,
+    }
+    if interrupted:
+        return _OCR_INTERRUPT_HINT
+    if detail:
+        return f"PaddleOCR worker finished without results.\n{detail}"
+    return f"PaddleOCR worker finished without results (exit {exit_code})."
+
 
 def _get_ocr_worker(python_exe: str) -> subprocess.Popen[str]:
     global _ocr_worker, _ocr_worker_py
@@ -350,6 +387,7 @@ def _get_ocr_worker(python_exe: str) -> subprocess.Popen[str]:
         cwd=str(INFERENCE_ROOT),
         env=_env_for_worker(),
         bufsize=1,
+        **ocr_worker_popen_kwargs(),
     )
     _ocr_worker = proc
     _ocr_worker_py = python_exe
@@ -362,9 +400,12 @@ def _run_ocr_worker_job(
     *,
     timeout_s: float,
     on_progress: Any | None = None,
+    cancel_check: Any | None = None,
 ) -> dict[str, Any]:
     """Send one JSON job to the persistent OCR process and wait for done/error."""
     with _OCR_WORKER_LOCK:
+        if cancel_check is not None and cancel_check():
+            raise OcrCancelled()
         proc = _get_ocr_worker(python_exe)
         assert proc.stdin is not None and proc.stdout is not None
         body = json.dumps(payload) + "\n"
@@ -379,14 +420,25 @@ def _run_ocr_worker_job(
             proc.stdin.flush()
 
         timed_out = threading.Event()
+        finished = threading.Event()
 
         def _on_timeout() -> None:
             timed_out.set()
             _kill_ocr_worker()
 
+        def _watch_cancel() -> None:
+            if cancel_check is None:
+                return
+            while not finished.wait(0.25):
+                if cancel_check():
+                    _kill_ocr_worker()
+                    return
+
         timer = threading.Timer(timeout_s, _on_timeout)
         timer.daemon = True
         timer.start()
+        watcher = threading.Thread(target=_watch_cancel, daemon=True)
+        watcher.start()
         done: dict[str, Any] | None = None
         errors: list[str] = []
         logs: list[str] = []
@@ -415,8 +467,12 @@ def _run_ocr_worker_job(
                     errors.append(str(event.get("message") or "OCR failed"))
                     break
         finally:
+            finished.set()
             timer.cancel()
 
+        if cancel_check is not None and cancel_check():
+            _kill_ocr_worker()
+            raise OcrCancelled()
         if timed_out.is_set():
             raise TimeoutError(
                 f"PaddleOCR worker timed out after {int(timeout_s)}s. "
@@ -426,9 +482,8 @@ def _run_ocr_worker_job(
             raise RuntimeError(f"PaddleOCR worker failed: {errors[0]}")
         if done is None:
             code = proc.poll()
-            detail = "\n".join(logs[-15:]) or f"worker exited ({code})"
             _kill_ocr_worker()
-            raise RuntimeError(f"PaddleOCR worker finished without results.\n{detail}")
+            raise RuntimeError(ocr_worker_exit_error(logs, code))
         return done
 
 
@@ -446,6 +501,47 @@ def _ocr_det_params(settings: Settings, profile: str, ocr_options: dict[str, Any
         "det_limit_side_len": int(det_side) if det_side is not None else int(settings.paddle_ocr_det_limit_side_len),
         "det_db_thresh": float(det_db) if det_db is not None else None,
     }
+
+
+def _as_optional_bool(value: Any) -> bool | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)) and value in (0, 1):
+        return bool(value)
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off"}:
+        return False
+    return None
+
+
+def ocr_tile_wanted(
+    settings: Settings,
+    profile: str,
+    ocr_options: dict[str, Any] | None = None,
+    *,
+    backend: str | None = None,
+) -> bool:
+    """Whether this crop should be split into overlapping tiles.
+
+    Title-block (``default``) and drawing-area (``dense``) are one pass unless the
+    client opts in. PaddleOCR-VL never tiles.
+    """
+    opts = ocr_options or {}
+    resolved = (backend or resolve_ocr_backend(settings, opts) or "").strip().lower()
+    if resolved == "vl":
+        return False
+
+    explicit = _as_optional_bool(opts.get("tile"))
+    if explicit is None:
+        key = "tile_drawing" if profile == "dense" else "tile_title_block"
+        explicit = _as_optional_bool(opts.get(key))
+    if explicit is not None:
+        return explicit
+    return False
 
 
 def _ocr_tile_size(settings: Settings, profile: str, ocr_options: dict[str, Any] | None = None) -> int:
@@ -501,6 +597,7 @@ def run_paddle_ocr_lines(
     profile: str = "default",
     ocr_options: dict[str, Any] | None = None,
     on_progress: Any | None = None,
+    cancel_check: Any | None = None,
 ) -> list[dict[str, Any]]:
     """
     Return OCR lines: {text, confidence, bbox:[[x,y],...]}.
@@ -532,7 +629,7 @@ def run_paddle_ocr_lines(
 
     lang = str(opts.get("lang") or settings.paddle_ocr_lang or "en")
     use_gpu = bool(opts.get("use_gpu") if "use_gpu" in opts else settings.paddle_ocr_use_gpu)
-    use_doc_orientation_classify = bool(opts.get("use_doc_orientation_classify", True))
+    use_doc_orientation_classify = bool(opts.get("use_doc_orientation_classify", False))
     use_doc_unwarping = bool(opts.get("use_doc_unwarping", False))
     use_textline_orientation = bool(opts.get("use_textline_orientation", True))
     text_rec_score_thresh = float(opts.get("text_rec_score_thresh", 0.5))
@@ -563,27 +660,34 @@ def run_paddle_ocr_lines(
     if in_process_ok:
         from app.pipeline.paddle_ocr_worker import ocr_image_array
 
-        return scale_ocr_line_boxes(
-            ocr_image_array(
-                rgb_in,
-                lang=lang,
-                use_gpu=use_gpu,
-                det_limit_side_len=det["det_limit_side_len"],
-                det_db_thresh=det["det_db_thresh"],
-                use_doc_orientation_classify=use_doc_orientation_classify,
-                use_doc_unwarping=use_doc_unwarping,
-                use_textline_orientation=use_textline_orientation,
-                text_rec_score_thresh=text_rec_score_thresh,
-                backend=backend,
-                pipeline_version=pipeline_version,
-                vl_max_side=inner_vl_max,
-                use_layout_detection=use_layout_detection,
-                vl_rec_model_dir=vl_rec_model_dir,
-                layout_detection_model_dir=layout_detection_model_dir,
-            ),
-            up_scale,
-        )
+        if cancel_check is not None and cancel_check():
+            raise OcrCancelled()
+        try:
+            return scale_ocr_line_boxes(
+                ocr_image_array(
+                    rgb_in,
+                    lang=lang,
+                    use_gpu=use_gpu,
+                    det_limit_side_len=det["det_limit_side_len"],
+                    det_db_thresh=det["det_db_thresh"],
+                    use_doc_orientation_classify=use_doc_orientation_classify,
+                    use_doc_unwarping=use_doc_unwarping,
+                    use_textline_orientation=use_textline_orientation,
+                    text_rec_score_thresh=text_rec_score_thresh,
+                    backend=backend,
+                    pipeline_version=pipeline_version,
+                    vl_max_side=inner_vl_max,
+                    use_layout_detection=use_layout_detection,
+                    vl_rec_model_dir=vl_rec_model_dir,
+                    layout_detection_model_dir=layout_detection_model_dir,
+                ),
+                up_scale,
+            )
+        except KeyboardInterrupt as exc:
+            raise RuntimeError(_OCR_INTERRUPT_HINT) from exc
 
+    if cancel_check is not None and cancel_check():
+        raise OcrCancelled()
     py = resolve_paddle_python(settings)
     ready = _probe_paddle_vl(str(py)) if backend == "vl" and py else (_probe_paddle(str(py)) if py else False)
     if py is None or not ready:
@@ -610,7 +714,13 @@ def run_paddle_ocr_lines(
             "layout_detection_model_dir": layout_detection_model_dir,
         }
         timeout_s = 600.0 if backend == "vl" else 180.0
-        done = _run_ocr_worker_job(str(py), payload, timeout_s=timeout_s, on_progress=on_progress)
+        done = _run_ocr_worker_job(
+            str(py),
+            payload,
+            timeout_s=timeout_s,
+            on_progress=on_progress,
+            cancel_check=cancel_check,
+        )
         return scale_ocr_line_boxes(list(done.get("lines") or []), up_scale)
 
 
@@ -624,8 +734,9 @@ def run_paddle_ocr_lines_for_crop(
     cancel_check: Any | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """
-    OCR a crop. Pages larger than Paddle's 960px default are tiled (same pattern as YOLO infer).
-    Crops smaller than 960 are upsampled so small title-block / label text is readable.
+    OCR a crop. Title-block and drawing-area are a single pass unless the client
+    opts into overlapping tiles. Crops smaller than 960 are upsampled so small
+    title-block / label text is readable.
     """
     settings = settings or get_settings()
     backend = resolve_ocr_backend(settings, ocr_options)
@@ -637,11 +748,13 @@ def run_paddle_ocr_lines_for_crop(
             profile=profile,
             ocr_options=ocr_options,
             on_progress=on_progress,
+            cancel_check=cancel_check,
         )
 
     # PaddleOCR-VL is a page/crop VLM — tiling 960px windows through a 0.9B model is slow
-    # and NaViT already handles variable resolution. Skip classic PP-OCR tiling.
-    if backend != "vl" and bool(settings.paddle_ocr_tile_enabled):
+    # and NaViT already handles variable resolution.
+    tile_ok = ocr_tile_wanted(settings, profile, ocr_options, backend=backend)
+    if tile_ok:
         from app.pipeline.paddle_ocr_tiling import run_tiled_ocr_lines
 
         size = _ocr_tile_size(settings, profile, ocr_options)
@@ -654,6 +767,7 @@ def run_paddle_ocr_lines_for_crop(
                 profile=profile,
                 ocr_options=tile_opts,
                 on_progress=on_progress,
+                cancel_check=cancel_check,
             )
 
         return run_tiled_ocr_lines(
@@ -721,14 +835,32 @@ def parse_level_name(text: str) -> str | None:
     return _with_plan_suffix(f"Level {token}", text)
 
 
+def _plausible_unit_id(uid: str) -> bool:
+    """Dwelling numbers (`101`, `12B`) or a single letter (`A`). Reject OCR crumbs like EN / CT."""
+    token = (uid or "").strip().upper()
+    if not token or token in UNIT_ID_STOPWORDS:
+        return False
+    if re.search(r"\d", token):
+        return True
+    return len(token) == 1 and token.isalpha()
+
+
 def parse_unit_ids(text: str, *, limit: int = 20) -> list[str]:
-    found: list[str] = []
-    seen: set[str] = set()
+    hits: list[tuple[int, str]] = []
     for m in UNIT_RE.finditer(text or ""):
         uid = m.group(1).strip().upper()
-        if not uid or uid in seen or uid in UNIT_ID_STOPWORDS:
+        if not _plausible_unit_id(uid):
             continue
-        if not re.search(r"\d", uid) and len(uid) > 3:
+        hits.append((m.start(), uid))
+    for m in UNIT_U_RE.finditer(text or ""):
+        uid = m.group(1).strip().upper()
+        if not _plausible_unit_id(uid):
+            continue
+        hits.append((m.start(), uid))
+    found: list[str] = []
+    seen: set[str] = set()
+    for _, uid in sorted(hits, key=lambda item: item[0]):
+        if uid in seen:
             continue
         seen.add(uid)
         found.append(uid)

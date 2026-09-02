@@ -1,5 +1,16 @@
-import type { OverlayEntity, OverlayGeometry } from "./types";
+import {
+  cocoVisibility,
+  serializeCompassKeypoints,
+} from "@/lib/hierarchy/compassKeypoints";
+import {
+  attachKeypointsFromFlags,
+  isCompassKeypointLabel,
+  isNorthArrowEntity,
+  mergeSiblingCompassPoints,
+  northArrowKeypoints,
+} from "./compassKeypointAnnotate";
 import { makeLabeledEntity } from "./labelClasses";
+import type { OverlayEntity, OverlayGeometry } from "./types";
 
 export interface LabelMeShape {
   label: string;
@@ -98,6 +109,13 @@ export function parseLabelMeJson(value: unknown, now = new Date().toISOString())
   const doc = value as Record<string, unknown>;
   const shapes = Array.isArray(doc.shapes) ? doc.shapes : [];
   const entities: OverlayEntity[] = [];
+  const siblingPoints: Array<{
+    name: "tip" | "base";
+    x: number;
+    y: number;
+    visibility?: "visible" | "occluded" | "not_labeled";
+    groupId?: number | null;
+  }> = [];
   let skipped = 0;
   for (const raw of shapes) {
     if (!raw || typeof raw !== "object") {
@@ -111,6 +129,24 @@ export function parseLabelMeJson(value: unknown, now = new Date().toISOString())
       skipped += 1;
       continue;
     }
+    const keypointName = isCompassKeypointLabel(label);
+    const flags =
+      shape.flags && typeof shape.flags === "object" && !Array.isArray(shape.flags)
+        ? (shape.flags as Record<string, unknown>)
+        : undefined;
+    if (keypointName && geometry.kind === "point") {
+      siblingPoints.push({
+        name: keypointName,
+        x: geometry.x,
+        y: geometry.y,
+        visibility:
+          flags?.occluded === true || flags?.occluded === 1
+            ? "occluded"
+            : cocoVisibility(flags?.visibility),
+        groupId: typeof shape.group_id === "number" ? shape.group_id : null,
+      });
+      continue;
+    }
     const entity = makeLabeledEntity(label, geometry, "labelme", now);
     if (typeof shape.description === "string" && shape.description) {
       entity.attributes.description = shape.description;
@@ -118,10 +154,10 @@ export function parseLabelMeJson(value: unknown, now = new Date().toISOString())
     if (shape.group_id !== null && shape.group_id !== undefined) {
       entity.attributes.groupId = shape.group_id;
     }
-    entities.push(entity);
+    entities.push(attachKeypointsFromFlags(entity, flags));
   }
   return {
-    entities,
+    entities: mergeSiblingCompassPoints(entities, siblingPoints),
     imagePath: typeof doc.imagePath === "string" ? doc.imagePath : "",
     imageWidth: asNumber(doc.imageWidth) ?? 0,
     imageHeight: asNumber(doc.imageHeight) ?? 0,
@@ -129,7 +165,7 @@ export function parseLabelMeJson(value: unknown, now = new Date().toISOString())
   };
 }
 
-function pointsFromGeometry(geometry: OverlayGeometry): { shape_type: string; points: number[][] } {
+export function pointsFromGeometry(geometry: OverlayGeometry): { shape_type: string; points: number[][] } {
   if (geometry.kind === "rect") {
     return {
       shape_type: "rectangle",
@@ -166,13 +202,14 @@ export function overlaysToLabelMe(
       const description =
         typeof entity.attributes.description === "string" ? entity.attributes.description : "";
       const groupId = entity.attributes.groupId;
+      const keypoints = isNorthArrowEntity(entity) ? northArrowKeypoints(entity) : [];
       return {
         label: entity.label,
         points,
         group_id: typeof groupId === "number" ? groupId : null,
         description,
         shape_type,
-        flags: {},
+        flags: keypoints.length ? { keypoints: serializeCompassKeypoints(keypoints) } : {},
       };
     }),
     imagePath: meta.imagePath,

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  inferViewerRotation,
   normalizeRotation,
   rotateGeometry,
   rotatePoint,
@@ -7,6 +8,29 @@ import {
 } from "./pageRotation";
 
 describe("pageRotation", () => {
+  it("uses a stored viewer rotation before inferring", () => {
+    expect(
+      inferViewerRotation({
+        stored: 270,
+        pdfWidth: 595,
+        pdfHeight: 842,
+        pageWidthPx: 3508,
+        pageHeightPx: 2480,
+      }),
+    ).toBe(270);
+  });
+
+  it("infers 90° when the raster was turned from portrait to landscape", () => {
+    expect(
+      inferViewerRotation({
+        pdfWidth: 595,
+        pdfHeight: 842,
+        pageWidthPx: 3508,
+        pageHeightPx: 2480,
+      }),
+    ).toBe(90);
+  });
+
   it("normalizes angles onto 90° steps", () => {
     expect(normalizeRotation(-90)).toBe(270);
     expect(normalizeRotation(450)).toBe(90);

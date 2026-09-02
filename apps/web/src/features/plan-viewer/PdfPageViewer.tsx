@@ -6,8 +6,17 @@ import type { PointPx } from "@/lib/scale/parseScale";
 import { pixelDistance } from "@/lib/scale/parseScale";
 import { clientToImagePixels, loupeImageStyle } from "./imageCoords";
 import { useViewerStore } from "./useViewerStore";
-import { clampPanToViewport, clampZoom } from "./viewBounds";
-import { OcrHighlightsSvg } from "./OcrHighlightsSvg";
+import {
+  clampPanToViewport,
+  clampZoom,
+  panForZoomAtPoint,
+  zoomDeltaFromButton,
+  zoomDeltaFromWheel,
+} from "./viewBounds";
+import { IconLoupe } from "@/features/plan-editor/ToolbarIcons";
+import { OcrHighlightsSvg, type OcrHighlight } from "./OcrHighlightsSvg";
+import { OcrRoomMarkersSvg, type OcrRoomMarker } from "./OcrRoomMarkersSvg";
+import { UnitGraphOverlaySvg, type UnitGraphOverlayProps } from "./UnitGraphOverlaySvg";
 
 const OverlayHost = dynamic(
   () => import("@/features/plan-editor/OverlayHost").then((m) => m.OverlayHost),
@@ -40,12 +49,18 @@ interface PdfPageViewerProps {
   activeOcrTile?: { x: number; y: number; width: number; height: number } | null;
   ocrProgressLabel?: string | null;
   /** OCR line highlights drawn over the page (image pixel coords). */
-  ocrHighlights?: { x: number; y: number; width: number; height: number; text: string }[];
+  ocrHighlights?: OcrHighlight[];
+  /** Spatial room-label pins (living, kitchen…) when graph/geometry tabs are active. */
+  ocrRoomMarkers?: OcrRoomMarker[];
+  /** Unit graph nodes and topology drawn on the floor plan (Graph tab). */
+  unitGraphOverlay?: Omit<UnitGraphOverlayProps, "pageWidthPx" | "pageHeightPx"> | null;
   /** Enable select/move/resize on detected layout regions. */
   layoutEditMode?: boolean;
+  /** Page scale for wall thickness coloring. */
+  pixelsPerMeter?: number | null;
   /** Show magnifier loupe toggle (annotate / precision picking). */
   showLoupeToggle?: boolean;
-  /** Show OCR text overlay toggle (analysis page). */
+  /** When true, OCR highlights respect the sidebar View toggle. */
   showOcrToggle?: boolean;
 }
 
@@ -76,7 +91,10 @@ export function PdfPageViewer({
   activeOcrTile = null,
   ocrProgressLabel = null,
   ocrHighlights = [],
+  ocrRoomMarkers = [],
+  unitGraphOverlay = null,
   layoutEditMode = false,
+  pixelsPerMeter = null,
   showLoupeToggle = false,
   showOcrToggle = true,
 }: PdfPageViewerProps) {
@@ -84,8 +102,18 @@ export function PdfPageViewer({
   const lastPos = useRef({ x: 0, y: 0 });
   const imgRef = useRef<HTMLImageElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
-  const { zoom, panX, panY, setZoom, setPan, resetView, showOcrText, toggleShowOcrText } =
-    useViewerStore();
+  const [middlePanning, setMiddlePanning] = useState(false);
+  const {
+    zoom,
+    panX,
+    panY,
+    setZoom,
+    setPan,
+    resetView,
+    showOcrText,
+    showPageImage,
+    pageImageOpacity,
+  } = useViewerStore();
   const [loupe, setLoupe] = useState<LoupeState | null>(null);
   const [annotateLoupe, setAnnotateLoupe] = useState(false);
   /** Uniform scale so the page fits the viewport without stretching. */
@@ -124,6 +152,8 @@ export function PdfPageViewer({
 
   const stageW = widthPx * fitScale;
   const stageH = heightPx * fitScale;
+  const viewW = stageW * zoom;
+  const viewH = stageH * zoom;
 
   const applyPan = useCallback(
     (nextX: number, nextY: number, nextZoom = zoom) => {
@@ -147,12 +177,30 @@ export function PdfPageViewer({
   );
 
   const applyZoom = useCallback(
-    (nextZoom: number) => {
+    (nextZoom: number, originClient?: { x: number; y: number }) => {
       const z = clampZoom(nextZoom);
+      const el = viewportRef.current;
+      let nextX = panX;
+      let nextY = panY;
+      if (originClient && el && z !== zoom) {
+        const rect = el.getBoundingClientRect();
+        const focused = panForZoomAtPoint(
+          panX,
+          panY,
+          zoom,
+          z,
+          originClient.x - rect.left,
+          originClient.y - rect.top,
+          el.clientWidth,
+          el.clientHeight,
+        );
+        nextX = focused.x;
+        nextY = focused.y;
+      }
       setZoom(z);
-      applyPan(panX, panY, z);
+      applyPan(nextX, nextY, z);
     },
-    [setZoom, applyPan, panX, panY],
+    [setZoom, applyPan, panX, panY, zoom],
   );
 
   // Re-clamp when the fit size or viewport changes (e.g. resize).
@@ -165,8 +213,7 @@ export function PdfPageViewer({
   const handleWheel = useCallback(
     (e: React.WheelEvent) => {
       e.preventDefault();
-      const delta = e.deltaY > 0 ? -0.1 : 0.1;
-      applyZoom(zoom + delta);
+      applyZoom(zoom + zoomDeltaFromWheel(e.altKey, e.deltaY), { x: e.clientX, y: e.clientY });
     },
     [zoom, applyZoom],
   );
@@ -228,9 +275,7 @@ export function PdfPageViewer({
 
   const handleMouseDown = useCallback(
     (e: React.MouseEvent) => {
-      if (e.button !== 0) return;
-
-      if (picking) {
+      if (e.button === 0 && picking) {
         const display = getDisplayRect();
         if (!display) return;
         const pt = clientToImagePixels(e.clientX, e.clientY, display, widthPx, heightPx);
@@ -238,7 +283,11 @@ export function PdfPageViewer({
         return;
       }
 
+      if (e.button !== 1) return;
+
+      e.preventDefault();
       dragging.current = true;
+      setMiddlePanning(true);
       lastPos.current = { x: e.clientX, y: e.clientY };
     },
     [picking, getDisplayRect, widthPx, heightPx, onMeasurePoint],
@@ -257,19 +306,25 @@ export function PdfPageViewer({
     [loupeActive, picking, updateLoupe, panX, panY, applyPan],
   );
 
-  const handleMouseUp = useCallback(() => {
+  const endPan = useCallback(() => {
     dragging.current = false;
+    setMiddlePanning(false);
   }, []);
 
-  const startBackgroundPan = useCallback((clientX: number, clientY: number) => {
-    dragging.current = true;
-    lastPos.current = { x: clientX, y: clientY };
-  }, []);
+  const handleMouseUp = useCallback(() => {
+    endPan();
+  }, [endPan]);
 
   const handleMouseLeave = useCallback(() => {
-    dragging.current = false;
+    endPan();
     setLoupe(null);
-  }, []);
+  }, [endPan]);
+
+  useEffect(() => {
+    const onWindowMouseUp = () => endPan();
+    window.addEventListener("mouseup", onWindowMouseUp);
+    return () => window.removeEventListener("mouseup", onWindowMouseUp);
+  }, [endPan]);
 
   const handleOverlayPointerMove = useCallback(
     (clientX: number, clientY: number) => {
@@ -284,11 +339,11 @@ export function PdfPageViewer({
   const visibleOcrHighlights = showOcrToggle && !showOcrText ? [] : ocrHighlights;
 
   return (
-    <div className="relative flex h-full min-h-0 flex-col">
+    <div className="relative flex h-full min-h-0 flex-1 flex-col overflow-hidden">
       {picking && (
         <div className="pointer-events-none absolute left-3 top-3 z-30">
           {toolMode === "calibrate" && (
-            <span className="rounded bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-900 shadow-sm">
+            <span className="rounded bg-amber-100 px-2 py-0.5 text-xs font-semibold uppercase tracking-wide text-amber-900 shadow-sm">
               Calibrate
               {measurePoints.length === 0 && " · point 1"}
               {measurePoints.length === 1 && " · point 2"}
@@ -296,7 +351,7 @@ export function PdfPageViewer({
             </span>
           )}
           {toolMode === "measure" && (
-            <span className="rounded bg-sky-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-sky-900 shadow-sm">
+            <span className="rounded bg-sky-100 px-2 py-0.5 text-xs font-semibold uppercase tracking-wide text-sky-900 shadow-sm">
               Measure
               {measurePoints.length === 0 && " · point 1"}
               {measurePoints.length === 1 && " · point 2"}
@@ -308,12 +363,12 @@ export function PdfPageViewer({
       {detectProgressLabel || ocrProgressLabel ? (
         <div className="pointer-events-none absolute left-3 top-3 z-30 flex flex-col gap-1">
           {detectProgressLabel ? (
-            <span className="rounded bg-sky-900/90 px-2 py-1 text-[11px] font-medium text-white shadow-sm">
+            <span className="rounded bg-sky-900/90 px-2 py-1 text-[13px] font-medium text-white shadow-sm">
               {detectProgressLabel}
             </span>
           ) : null}
           {ocrProgressLabel ? (
-            <span className="rounded bg-teal-900/90 px-2 py-1 text-[11px] font-medium text-white shadow-sm">
+            <span className="rounded bg-teal-900/90 px-2 py-1 text-[13px] font-medium text-white shadow-sm">
               {ocrProgressLabel}
             </span>
           ) : null}
@@ -322,22 +377,35 @@ export function PdfPageViewer({
 
       <div
         ref={viewportRef}
-        className="relative min-h-0 flex-1 overflow-hidden bg-slate-200"
+        data-hl-canvas
+        className="relative min-h-0 flex-1 overflow-hidden bg-[var(--hl-workbench)]"
         onWheel={handleWheel}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseLeave}
-        style={{ cursor: picking ? "none" : dragging.current ? "grabbing" : "grab" }}
+        onContextMenu={(e) => {
+          if (enableOverlay && !picking) return;
+          e.preventDefault();
+          window.dispatchEvent(
+            new CustomEvent("hl-contextmenu", {
+              detail: { x: e.clientX, y: e.clientY, kind: "app", target: null },
+            }),
+          );
+        }}
+        style={{ cursor: picking ? "none" : middlePanning ? "grabbing" : "default" }}
       >
-        <div className="absolute inset-0 flex items-center justify-center">
+        <div className="absolute inset-0 flex items-center justify-center overflow-hidden">
           <div
-            className="relative shadow-md"
+            className="relative shrink-0 shadow-md"
             style={{
-              width: stageW,
-              height: stageH,
-              transform: `translate(${panX}px, ${panY}px) scale(${zoom})`,
-              transformOrigin: "center center",
+              width: viewW,
+              height: viewH,
+              minWidth: viewW,
+              minHeight: viewH,
+              flex: "0 0 auto",
+              background: !showPageImage || pageImageOpacity < 1 ? "#f8fafc" : undefined,
+              transform: `translate(${panX}px, ${panY}px)`,
             }}
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -347,15 +415,20 @@ export function PdfPageViewer({
               alt="Uploaded floor plan page"
               width={widthPx}
               height={heightPx}
-              className="block h-full w-full max-w-none"
+              className="block max-w-none"
+              style={{
+                width: viewW,
+                height: viewH,
+                opacity: showPageImage ? pageImageOpacity : 0,
+              }}
               draggable={false}
             />
             {enableOverlay && (
               <OverlayHost
                 imageWidth={widthPx}
                 imageHeight={heightPx}
-                displayWidth={stageW}
-                displayHeight={stageH}
+                displayWidth={viewW}
+                displayHeight={viewH}
                 zoom={zoom}
                 passThrough={picking}
                 overlayMode={overlayMode}
@@ -363,7 +436,7 @@ export function PdfPageViewer({
                 ocrRegion={ocrRegion}
                 activeOcrTile={activeOcrTile}
                 layoutEditMode={layoutEditMode}
-                onBackgroundPanStart={startBackgroundPan}
+                pixelsPerMeter={pixelsPerMeter}
                 onPanBy={(dx, dy) => applyPan(panX + dx, panY + dy)}
                 onPointerMove={loupeActive ? handleOverlayPointerMove : undefined}
               />
@@ -375,11 +448,27 @@ export function PdfPageViewer({
                 pageHeightPx={heightPx}
               />
             ) : null}
+            {ocrRoomMarkers.length > 0 && !unitGraphOverlay ? (
+              <OcrRoomMarkersSvg
+                markers={ocrRoomMarkers}
+                pageWidthPx={widthPx}
+                pageHeightPx={heightPx}
+              />
+            ) : null}
+            {unitGraphOverlay ? (
+              <UnitGraphOverlaySvg
+                {...unitGraphOverlay}
+                pageWidthPx={widthPx}
+                pageHeightPx={heightPx}
+              />
+            ) : null}
             {(p1 || p2) && (
               <svg
                 className="pointer-events-none absolute inset-0 h-full w-full"
                 viewBox={`0 0 ${widthPx} ${heightPx}`}
                 preserveAspectRatio="none"
+                shapeRendering="geometricPrecision"
+                textRendering="geometricPrecision"
               >
                 {p1 && p2 && (
                   <line
@@ -564,46 +653,34 @@ export function PdfPageViewer({
       >
         <button
           type="button"
-          className="h-7 w-7 text-sm font-medium text-slate-700 hover:bg-slate-100"
-          title="Zoom out"
-          onClick={() => applyZoom(zoom - 0.2)}
+          className="h-8 w-8 text-sm font-medium text-slate-700 hover:bg-slate-100"
+          title="Zoom out (Alt for faster)"
+          onClick={(e) => applyZoom(zoom + zoomDeltaFromButton(e.altKey, -1))}
         >
           −
         </button>
-        <span className="min-w-[2.75rem] border-x border-slate-200 px-1.5 text-center text-[11px] tabular-nums text-slate-600">
+        <span
+          className="min-w-[2.75rem] border-x border-slate-200 px-1.5 text-center text-[13px] tabular-nums text-slate-600"
+          title="Scroll to zoom · Alt+scroll for faster · max 1500%"
+        >
           {Math.round(zoom * 100)}%
         </span>
         <button
           type="button"
-          className="h-7 w-7 text-sm font-medium text-slate-700 hover:bg-slate-100"
-          title="Zoom in"
-          onClick={() => applyZoom(zoom + 0.2)}
+          className="h-8 w-8 text-sm font-medium text-slate-700 hover:bg-slate-100"
+          title="Zoom in (Alt for faster)"
+          onClick={(e) => applyZoom(zoom + zoomDeltaFromButton(e.altKey, 1))}
         >
           +
         </button>
         <button
           type="button"
-          className="h-7 border-l border-slate-200 px-2 text-[11px] font-medium text-slate-700 hover:bg-slate-100"
+          className="h-7 border-l border-slate-200 px-2 text-[13px] font-medium text-slate-700 hover:bg-slate-100"
           title="Fit page"
           onClick={resetView}
         >
           Fit
         </button>
-        {showOcrToggle ? (
-          <button
-            type="button"
-            className={
-              showOcrText
-                ? "flex h-7 items-center border-l border-slate-200 bg-indigo-700 px-2.5 text-[11px] font-medium text-white hover:bg-indigo-800"
-                : "flex h-7 items-center border-l border-slate-200 px-2.5 text-[11px] font-medium text-slate-700 hover:bg-slate-100"
-            }
-            title={showOcrText ? "Hide OCR text on plan" : "Show OCR text on plan"}
-            aria-pressed={showOcrText}
-            onClick={() => toggleShowOcrText()}
-          >
-            OCR text
-          </button>
-        ) : null}
         {showLoupeToggle ? (
           <button
             type="button"
@@ -616,18 +693,7 @@ export function PdfPageViewer({
             aria-pressed={annotateLoupe}
             onClick={() => setAnnotateLoupe((on) => !on)}
           >
-            <svg
-              viewBox="0 0 24 24"
-              className="h-4 w-4"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              aria-hidden
-            >
-              <circle cx="10" cy="10" r="6" />
-              <path d="M14.5 14.5L20 20" strokeLinecap="round" />
-              <circle cx="10" cy="10" r="2.5" fill="currentColor" stroke="none" />
-            </svg>
+            <IconLoupe />
           </button>
         ) : null}
       </div>

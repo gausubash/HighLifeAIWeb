@@ -1,5 +1,6 @@
 "use client";
 
+import { CompassBearingReadout } from "./CompassBearingReadout";
 import { entityTypeForLabel, isKnownAnnotateClass, LABELME_CLASSES, roomTypeFor } from "./labelClasses";
 import { classSwatch } from "./styles";
 import { entityAreaHint } from "./geometry";
@@ -10,10 +11,12 @@ export function EntityInspector({
   sourceFilter = "all",
   excludeLayout = true,
   classOptions,
+  compact = false,
 }: {
   sourceFilter?: "model" | "all";
   excludeLayout?: boolean;
   classOptions?: string[];
+  compact?: boolean;
 }) {
   const { entities, selectedIds } = useActiveOverlayPage();
   const deleteSelected = useOverlayStore((s) => s.deleteSelected);
@@ -27,20 +30,27 @@ export function EntityInspector({
 
   if (selectedIds.length > 1) {
     return (
-      <div className="text-xs text-slate-600">
-        {selectedIds.length} regions selected.
+      <div className={compact ? "flex items-center gap-1" : "text-xs text-slate-600"}>
+        <p className={compact ? "min-w-0 flex-1 text-[13px] text-slate-600" : undefined}>
+          {selectedIds.length} selected
+        </p>
         <button
           type="button"
-          className="mt-2 block w-full rounded border border-red-200 px-2 py-1 text-red-700 hover:bg-red-50"
+          className={
+            compact
+              ? "h-6 rounded border border-red-200 px-1.5 text-xs font-medium text-red-700 hover:bg-red-50"
+              : "mt-2 block w-full rounded border border-red-200 px-2 py-1 text-red-700 hover:bg-red-50"
+          }
           onClick={() => deleteSelected()}
         >
-          Remove selected
+          Remove
         </button>
       </div>
     );
   }
 
   if (!entity) {
+    if (compact) return null;
     return (
       <p className="text-xs leading-relaxed text-slate-500">
         {sourceFilter === "model"
@@ -53,6 +63,76 @@ export function EntityInspector({
   const measure = entityAreaHint(entity);
   const options = classOptions ?? [...LABELME_CLASSES];
   const known = isKnownAnnotateClass(entity.label) || options.includes(entity.label);
+
+  if (compact) {
+    return (
+      <div className="space-y-1.5 rounded-md border border-slate-200 bg-white px-2 py-1.5">
+        <div className="flex items-center gap-1">
+          <span
+            className="inline-block h-2.5 w-2.5 shrink-0 rounded-sm"
+            style={{ background: classSwatch(entity.label) }}
+          />
+          <select
+            aria-label="Detection class"
+            className="h-6 min-w-0 flex-1 rounded border border-slate-300 bg-white px-1 text-[13px] text-slate-800"
+            value={entity.label}
+            onChange={(e) => {
+              const next = e.target.value;
+              updateSelected({
+                label: next,
+                type: entityTypeForLabel(next),
+                attributes: { ...entity.attributes, roomType: roomTypeFor(next) },
+              });
+            }}
+          >
+            {!known ? <option value={entity.label}>{entity.label}</option> : null}
+            {options.map((name) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
+          </select>
+          {entity.source === "model" ? (
+            <>
+              <button
+                type="button"
+                className="h-6 shrink-0 rounded border border-emerald-200 bg-white px-1.5 text-xs font-medium text-emerald-800 hover:bg-emerald-50"
+                onClick={() => updateSelected({ status: "user_confirmed" })}
+              >
+                Keep
+              </button>
+              <button
+                type="button"
+                className="h-6 shrink-0 rounded border border-amber-200 bg-white px-1.5 text-xs font-medium text-amber-800 hover:bg-amber-50"
+                onClick={() => updateSelected({ status: "rejected" })}
+              >
+                Reject
+              </button>
+            </>
+          ) : null}
+          <button
+            type="button"
+            className="h-6 shrink-0 rounded border border-red-200 bg-white px-1.5 text-xs font-medium text-red-700 hover:bg-red-50"
+            onClick={() => deleteSelected()}
+          >
+            Remove
+          </button>
+        </div>
+        <p className="text-xs tabular-nums leading-snug text-slate-500">
+          {[
+            entity.source === "model"
+              ? `${Math.round(entity.confidence * 100)}%`
+              : entity.source === "labelme"
+                ? "imported"
+                : "drawn",
+            measure,
+          ]
+            .filter(Boolean)
+            .join(" · ")}
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-2 text-xs">
@@ -90,6 +170,7 @@ export function EntityInspector({
             : "Drawn"}
       </p>
       {measure ? <p className="text-slate-500">{measure}</p> : null}
+      <CompassBearingReadout entity={entity} />
       {entity.source === "model" ? (
         <div className="flex gap-2">
           <button

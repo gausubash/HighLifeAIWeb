@@ -14,6 +14,11 @@ interface LayoutState {
   projectsSectionOpen: boolean;
   drawingsSectionOpen: boolean;
   pagesSectionOpen: boolean;
+  viewSectionOpen: boolean;
+  /** Fraction of the right sidebar height allocated to the drawing group (0–1). */
+  drawingPanelRatio: number;
+  /** Keep the drawing toolbar visible instead of auto-hiding. */
+  toolbarPinned: boolean;
   sidebarWidth: number;
   leftPanelWidth: number;
   inspectorWidth: number;
@@ -26,6 +31,9 @@ interface LayoutState {
   toggleProjectsSection: () => void;
   toggleDrawingsSection: () => void;
   togglePagesSection: () => void;
+  toggleViewSection: () => void;
+  setDrawingPanelRatio: (ratio: number) => void;
+  toggleToolbarPinned: () => void;
   setSidebarWidth: (width: number) => void;
   setLeftPanelWidth: (width: number) => void;
   setInspectorWidth: (width: number) => void;
@@ -34,6 +42,7 @@ interface LayoutState {
 export const SIDEBAR_WIDTH = { min: 160, max: 360, default: 240 };
 export const LEFT_PANEL_WIDTH = { min: 88, max: 260, default: 112 };
 export const INSPECTOR_WIDTH = { min: 220, max: 480, default: 288 };
+export const DRAWING_PANEL = { min: 96, viewMin: 120, defaultRatio: 0.42, minRatio: 0.18, maxRatio: 0.82 };
 
 export const useLayoutStore = create<LayoutState>()(
   persist(
@@ -44,6 +53,9 @@ export const useLayoutStore = create<LayoutState>()(
       projectsSectionOpen: true,
       drawingsSectionOpen: true,
       pagesSectionOpen: true,
+      viewSectionOpen: true,
+      drawingPanelRatio: DRAWING_PANEL.defaultRatio,
+      toolbarPinned: false,
       sidebarWidth: SIDEBAR_WIDTH.default,
       leftPanelWidth: LEFT_PANEL_WIDTH.default,
       inspectorWidth: INSPECTOR_WIDTH.default,
@@ -58,6 +70,12 @@ export const useLayoutStore = create<LayoutState>()(
       toggleDrawingsSection: () =>
         set((s) => ({ drawingsSectionOpen: !s.drawingsSectionOpen })),
       togglePagesSection: () => set((s) => ({ pagesSectionOpen: !s.pagesSectionOpen })),
+      toggleViewSection: () => set((s) => ({ viewSectionOpen: !s.viewSectionOpen })),
+      setDrawingPanelRatio: (ratio) =>
+        set({
+          drawingPanelRatio: clamp(ratio, DRAWING_PANEL.minRatio, DRAWING_PANEL.maxRatio),
+        }),
+      toggleToolbarPinned: () => set((s) => ({ toolbarPinned: !s.toolbarPinned })),
       setSidebarWidth: (width) =>
         set({ sidebarWidth: clamp(width, SIDEBAR_WIDTH.min, SIDEBAR_WIDTH.max) }),
       setLeftPanelWidth: (width) =>
@@ -75,6 +93,9 @@ export const useLayoutStore = create<LayoutState>()(
         projectsSectionOpen: state.projectsSectionOpen,
         drawingsSectionOpen: state.drawingsSectionOpen,
         pagesSectionOpen: state.pagesSectionOpen,
+        viewSectionOpen: state.viewSectionOpen,
+        drawingPanelRatio: state.drawingPanelRatio,
+        toolbarPinned: state.toolbarPinned,
         sidebarWidth: state.sidebarWidth,
         leftPanelWidth: state.leftPanelWidth,
         inspectorWidth: state.inspectorWidth,

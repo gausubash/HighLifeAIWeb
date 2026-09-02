@@ -30,12 +30,13 @@ def test_floordata_ready_false_without_weights(tmp_path: Path, monkeypatch: pyte
     assert floordata_ready(settings, "deeplab") is False
 
 
-def test_detect_catalog_marks_floordata_runnable_when_tf_present() -> None:
-    from app.detect_catalog import _wall_backend_runnable
+def test_detect_catalog_does_not_list_floordata_wall_backends() -> None:
+    from app.detect_catalog import list_detect_models
 
-    assert _wall_backend_runnable("deeplab") is tensorflow_available()
-    assert _wall_backend_runnable("unet_floordata") is tensorflow_available()
-    assert _wall_backend_runnable("mitunet") is True
+    ids = {str(m["id"]) for m in list_detect_models()}
+    assert "wall:mitunet" in ids
+    assert "wall:deeplab" not in ids
+    assert "wall:unet_floordata" not in ids
 
 
 @pytest.mark.skipif(not tensorflow_available(), reason="TensorFlow runtime not available")

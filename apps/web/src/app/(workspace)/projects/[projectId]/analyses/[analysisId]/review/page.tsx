@@ -1,4 +1,4 @@
-import { ReviewPageClient } from "@/features/analyses/ReviewPageClient";
+import { redirect } from "next/navigation";
 
 interface PageProps {
   params: Promise<{ projectId: string; analysisId: string }>;
@@ -6,5 +6,5 @@ interface PageProps {
 
 export default async function ReviewPage({ params }: PageProps) {
   const { projectId, analysisId } = await params;
-  return <ReviewPageClient projectId={projectId} analysisId={analysisId} />;
+  redirect(`/projects/${projectId}/analyses/${analysisId}?tab=review`);
 }

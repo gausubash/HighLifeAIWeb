@@ -24,7 +24,7 @@ const SECTIONS = [
 
 function MathBlock({ children }: { children: string }) {
   return (
-    <pre className="overflow-x-auto rounded-md border border-[var(--hl-line)] bg-white px-4 py-3 font-mono text-[13px] leading-relaxed text-[var(--hl-ink)]">
+    <pre className="overflow-x-auto rounded-md border border-[var(--hl-line)] bg-white px-4 py-3 font-mono text-[14px] leading-relaxed text-[var(--hl-ink)]">
       {children}
     </pre>
   );
@@ -38,7 +38,7 @@ function ParamTable({
   return (
     <div className="overflow-x-auto rounded-md border border-[var(--hl-line)]">
       <table className="w-full min-w-[36rem] border-collapse text-left text-sm">
-        <thead className="bg-[var(--hl-mist)]/60 text-[11px] uppercase tracking-wide text-slate-600">
+        <thead className="bg-[var(--hl-mist)]/60 text-[13px] uppercase tracking-wide text-slate-600">
           <tr>
             <th className="px-3 py-2 font-medium">Parameter</th>
             <th className="px-3 py-2 font-medium">Default</th>
@@ -83,7 +83,7 @@ function Section({
 function DocsToc() {
   return (
     <nav className="space-y-1 p-2 text-xs">
-      <p className="px-2 pb-2 text-[10px] font-medium uppercase tracking-wide text-slate-400">
+      <p className="px-2 pb-2 text-xs font-medium uppercase tracking-wide text-slate-400">
         Contents
       </p>
       {SECTIONS.map((s) => (
@@ -105,13 +105,12 @@ export function DocsPageClient() {
       leftPanel={<DocsToc />}
       leftPanelTitle="Reference"
       showSidebar={false}
-      statusText="Detection & ML reference"
       allowNewProjectShortcut={false}
-      mainClassName="overflow-y-auto bg-[var(--hl-paper)]"
+      mainClassName="overflow-y-auto bg-[var(--hl-panel)]"
     >
       <article className="mx-auto max-w-3xl space-y-10 px-6 py-8 sm:px-10">
         <header className="space-y-3">
-          <p className="text-[11px] font-medium uppercase tracking-[0.16em] text-[var(--hl-moss)]">
+          <p className="text-[13px] font-medium uppercase tracking-[0.16em] text-[var(--hl-moss)]">
             Technical reference
           </p>
           <h1 className="font-display text-3xl font-semibold tracking-tight text-[var(--hl-ink)] sm:text-4xl">
@@ -119,9 +118,9 @@ export function DocsPageClient() {
           </h1>
           <p className="max-w-2xl text-sm leading-relaxed text-slate-600">
             Mathematics, models, and defaults used by the local inference service
-            (<code className="rounded bg-white px-1 py-0.5 text-[11px]">services/inference</code>
+            (<code className="rounded bg-white px-1 py-0.5 text-[13px]">services/inference</code>
             ). Values mirror{" "}
-            <code className="rounded bg-white px-1 py-0.5 text-[11px]">app/config.py</code> and
+            <code className="rounded bg-white px-1 py-0.5 text-[13px]">app/config.py</code> and
             Studio UI defaults.
           </p>
           <p className="text-xs text-slate-500">
@@ -162,26 +161,27 @@ export function DocsPageClient() {
             <code className="text-xs">maybe_tiled_detect()</code> (
             <code className="text-xs">tiling.py</code>).
           </p>
-          <div className="rounded-md border border-[var(--hl-line)] bg-white p-4 font-mono text-[12px] leading-6 text-slate-800">
+          <div className="rounded-md border border-[var(--hl-line)] bg-white p-4 font-mono text-[14px] leading-6 text-slate-800">
             {`page RGB
-  → [layout YOLO?] → crop drawing area
-  → wall backend (MitUNet | YOLO | MMDet | floorData | Roboflow)
-       └─ if max(H,W) > min_side: overlapping tiles → per-tile infer → NMM union
-  → [rooms YOLO?]
-  → stitch walls (mask backends) → scale to original → regions[]`}
+  → [layout YOLO on Layout tab]
+  → pick a detect task:
+       walls  → MitUNet or ArchVision Roboflow
+       rooms  → Architect YOLO (room classes)
+       objects → Architect YOLO (doors/windows/stairs)
+  → stitch wall masks → scale to original → regions[]`}
           </div>
           <p className="text-sm text-slate-700">
-            Only <strong className="font-medium">one</strong> wall backend runs per request
-            (<code className="text-xs">WALL_BACKEND</code>). Layout and room detectors are
-            independent flags. Outputs are concatenated — there is no cross-class conflict
-            resolver (see Overlapping regions).
+            Walls run <strong className="font-medium">MitUNet</strong> or{" "}
+            <strong className="font-medium">ArchVision</strong> (
+            <code className="text-xs">wall:roboflow</code>
+            ). Room types and objects are separate detect models. Layout stays on the Layout tab.
           </p>
         </Section>
 
         <Section id="models" title="Model catalog">
           <div className="overflow-x-auto rounded-md border border-[var(--hl-line)]">
             <table className="w-full min-w-[40rem] border-collapse text-left text-sm">
-              <thead className="bg-[var(--hl-mist)]/60 text-[11px] uppercase tracking-wide text-slate-600">
+              <thead className="bg-[var(--hl-mist)]/60 text-[13px] uppercase tracking-wide text-slate-600">
                 <tr>
                   <th className="px-3 py-2 font-medium">Id / token</th>
                   <th className="px-3 py-2 font-medium">Architecture</th>
@@ -191,14 +191,13 @@ export function DocsPageClient() {
               </thead>
               <tbody className="text-slate-700">
                 {[
-                  ["wall:mitunet (default)", "Mit B4 + U-Net + scSE", "Wall masks → polygons", "PyTorch + SMP"],
-                  ["wall:yolo", "YOLO OBB (GreenMap)", "Oriented wall boxes", "Ultralytics"],
-                  ["wall:cascade_swin / faster_rcnn / retinanet", "MMDet → torchvision", "Wall AABB boxes", "Torchvision"],
-                  ["wall:deeplab / unet_floordata", "DeepLabV3+ / UNet", "Wall masks → polygons", "TensorFlow (.venv-tf)"],
-                  ["wall:roboflow", "YOLOv8n-seg ONNX", "Instance walls (+ classes)", "Ultralytics / cloud"],
-                  ["layout (opt-in)", "YOLO (GreenMap)", "Drawing / legend / title", "Ultralytics"],
-                  ["rooms (opt-in)", "YOLO (Architect)", "Doors, windows, fixtures", "Ultralytics"],
-                  ["studio:<uuid>", "Fine-tuned base", "Custom detect / seg", "Same as base family"],
+                  ["wall:mitunet (default)", "Mit B4 + U-Net + scSE", "Wall segmentation", "PyTorch + SMP"],
+                  ["wall:roboflow", "Roboflow instance / box", "ArchVision walls (archvision_wall_detect)", "detect.roboflow.com"],
+                  ["room:architect", "YOLO (Architect)", "Room types (bedroom, unit, …)", "Ultralytics"],
+                  ["room:roboflow", "Roboflow instance-seg", "Office rooms (floorplan-9fxye)", "detect.roboflow.com"],
+                  ["object:architect", "YOLO (Architect)", "Doors, windows, stairs, lifts", "Ultralytics"],
+                  ["layout:greenmap", "YOLO (GreenMap)", "Drawing / legend / title", "Ultralytics"],
+                  ["studio:<uuid>", "Fine-tuned Studio base", "Task-specific detect / seg", "Same as base family"],
                 ].map(([id, arch, role, runtime]) => (
                   <tr key={id} className="border-t border-[var(--hl-line)] align-top">
                     <td className="px-3 py-2 font-mono text-xs text-[var(--hl-moss-deep)]">{id}</td>
@@ -221,17 +220,34 @@ export function DocsPageClient() {
               Letterbox to 512×512, ImageNet normalize, sigmoid logits → threshold 0.5.
             </p>
             <p>
-              <strong className="font-medium text-[var(--hl-ink)]">floorData.</strong> TensorFlow
-              DeepLabV3+ or UNet weights (<code className="text-xs">.h5</code>). Inference runs
-              in a dedicated Python 3.10–3.12 venv. Multi-channel masks take channel 0 or{" "}
-              <code className="text-xs">max</code> across channels — not exclusive argmax
-              multi-class.
+              <strong className="font-medium text-[var(--hl-ink)]">Architect.</strong> One YOLO
+              checkpoint, two Detect tasks: <code className="text-xs">room:architect</code> keeps
+              room / unit classes; <code className="text-xs">object:architect</code> keeps doors,
+              windows, stairs, and lifts. Place{" "}
+              <code className="text-xs">models/architect_floorplan.pt</code> or set{" "}
+              <code className="text-xs">YOLO_ROOM_WEIGHTS</code>.
             </p>
             <p>
-              <strong className="font-medium text-[var(--hl-ink)]">YOLO / Roboflow.</strong>{" "}
-              Ultralytics predict with confidence filter; tile-level NMM union is applied afterward.
-              Roboflow prefers local ONNX (<code className="text-xs">weights.onnx</code>), with
-              cloud API fallback.
+              <strong className="font-medium text-[var(--hl-ink)]">Roboflow rooms.</strong>{" "}
+              <code className="text-xs">room:roboflow</code> calls Universe{" "}
+              <code className="text-xs">floorplan-cvjp0/floorplan-9fxye</code> (instance
+              segmentation: company area, conference, reception, rest room, waiting). Set{" "}
+              <code className="text-xs">ROBOFLOW_API_KEY</code> on the inference service. This is
+              an office-trained set (~38% mAP), not a residential bedroom model.
+            </p>
+            <p>
+              <strong className="font-medium text-[var(--hl-ink)]">ArchVision walls.</strong>{" "}
+              <code className="text-xs">wall:roboflow</code> calls Universe{" "}
+              <code className="text-xs">walldetection-iekzl/archvision_wall_detect</code>
+              . Set <code className="text-xs">ROBOFLOW_API_KEY</code>; override version with{" "}
+              <code className="text-xs">ROBOFLOW_WALL_MODEL_ID</code> (default{" "}
+              <code className="text-xs">archvision_wall_detect/1</code>
+              ).
+            </p>
+            <p>
+              <strong className="font-medium text-[var(--hl-ink)]">Model Studio.</strong> Fine-tuned
+              checkpoints appear as <code className="text-xs">studio:&lt;uuid&gt;</code> under the
+              same Detect groups as their dataset purpose (walls, rooms, objects).
             </p>
           </div>
         </Section>
@@ -254,11 +270,10 @@ Default: tile_size = 640, overlap = 0.2
 Edge tiles: last window is snapped so the far edge of the image
 is covered; crops shorter than tile_size are padded with white (255).`}</MathBlock>
           <p className="text-sm text-slate-700">
-            Backend-specific tile sizes when tiling is enabled: MitUNet / floorData use{" "}
-            <code className="text-xs">512</code>; YOLO walls / MMDet use{" "}
-            <code className="text-xs">896</code>; rooms <code className="text-xs">640</code>;
-            layout <code className="text-xs">1280</code>; Roboflow{" "}
-            <code className="text-xs">640</code>.
+            Backend-specific tile sizes when tiling is enabled: MitUNet walls use{" "}
+            <code className="text-xs">512</code>; room/object Architect uses{" "}
+            <code className="text-xs">640</code>; layout uses{" "}
+            <code className="text-xs">1280</code>.
           </p>
           <ParamTable
             rows={[
@@ -346,7 +361,7 @@ Confidence (MitUNet): mean of p on positive pixels.`}</MathBlock>
         <Section id="coords" title="Coordinate systems">
           <div className="overflow-x-auto rounded-md border border-[var(--hl-line)]">
             <table className="w-full min-w-[32rem] border-collapse text-left text-sm">
-              <thead className="bg-[var(--hl-mist)]/60 text-[11px] uppercase tracking-wide text-slate-600">
+              <thead className="bg-[var(--hl-mist)]/60 text-[13px] uppercase tracking-wide text-slate-600">
                 <tr>
                   <th className="px-3 py-2 font-medium">Stage</th>
                   <th className="px-3 py-2 font-medium">Space</th>
@@ -553,12 +568,12 @@ unitIds, title, sheetType. Also merged into policy analyze sheet_meta.`}</MathBl
 
         <footer className="pb-8 text-xs text-slate-500">
           Source of truth:{" "}
-          <code className="text-[11px]">services/inference/app/config.py</code>,{" "}
-          <code className="text-[11px]">app/yolo/tiling.py</code>,{" "}
-          <code className="text-[11px]">app/yolo/mitunet.py</code>,{" "}
-          <code className="text-[11px]">app/studio/floordata_train.py</code>,{" "}
-          <code className="text-[11px]">app/pipeline/hierarchy.py</code>,{" "}
-          <code className="text-[11px]">app/pipeline/paddle_ocr.py</code>.
+          <code className="text-[13px]">services/inference/app/config.py</code>,{" "}
+          <code className="text-[13px]">app/yolo/tiling.py</code>,{" "}
+          <code className="text-[13px]">app/yolo/mitunet.py</code>,{" "}
+          <code className="text-[13px]">app/studio/floordata_train.py</code>,{" "}
+          <code className="text-[13px]">app/pipeline/hierarchy.py</code>,{" "}
+          <code className="text-[13px]">app/pipeline/paddle_ocr.py</code>.
         </footer>
       </article>
     </WorkspaceShell>

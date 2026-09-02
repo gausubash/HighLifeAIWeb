@@ -1,126 +1,142 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ProjectSidebar } from "@/components/shell/ProjectSidebar";
+import { AnalysisRightSidebar } from "@/features/analyses/AnalysisRightSidebar";
 import { VerticalInspectorTabs } from "@/components/shell/VerticalInspectorTabs";
 import { WorkspaceShell } from "@/components/shell/WorkspaceShell";
-import { PageThumbnailStrip } from "@/features/plan-viewer/PageThumbnailStrip";
 import { PdfPageViewer } from "@/features/plan-viewer/PdfPageViewer";
 import { useViewerStore } from "@/features/plan-viewer/useViewerStore";
 import { EditorToolbar } from "@/features/plan-editor/EditorToolbar";
-import { EntityInspector } from "@/features/plan-editor/EntityInspector";
-import { DetectModelSelect } from "@/features/plan-editor/DetectModelSelect";
+import { DetectPanel } from "@/features/plan-editor/DetectPanel";
+import { OverlayViewSection } from "@/features/plan-editor/OverlayViewSection";
 import { ManualLayoutPanel } from "@/features/plan-editor/ManualLayoutPanel";
-import { LayoutRegionInspector } from "@/features/plan-editor/LayoutRegionInspector";
 import { OverlayHotkeys } from "@/features/plan-editor/OverlayHotkeys";
-import { OverlayLayerPanel } from "@/features/plan-editor/OverlayLayerPanel";
 import { HierarchyPanel } from "@/features/analyses/HierarchyPanel";
+import { ReviewPanel } from "@/features/analyses/ReviewPanel";
+import { GeometryPanel } from "@/features/analyses/GeometryPanel";
+import { useGeometryExtractStore } from "@/features/analyses/useGeometryExtractStore";
+import { useUnitGraphView } from "@/features/analyses/useUnitGraphView";
+import { PolicyPanel } from "@/features/policy/PolicyPanel";
 import { OcrPanel } from "@/features/ocr/OcrPanel";
+import { useAppendDrawingPages } from "@/features/uploads/useAppendDrawingPages";
+import { ocrRunFromChecks } from "@/features/ocr/ocrRunScope";
+import { applyOcrResolution } from "@/features/ocr/ocrResolution";
 import { useOcrSettingsStore } from "@/features/ocr/useOcrSettingsStore";
 import { pageKey, useOverlayStore } from "@/features/plan-editor/useOverlayStore";
 import { usePageRegionDetect } from "@/features/plan-editor/usePageRegionDetect";
-import { geometryBBox } from "@/features/plan-editor/types";
 import { ScalePanel, type ScaleToolMode } from "@/features/scale/ScalePanel";
 import { useAnalysisBundle, useProject } from "@/hooks/useProjectStore";
-import { requestPolicyAnalyze } from "@/lib/api/policyClient";
+import { computeApartmentSheet } from "@/lib/hierarchy/apartmentCharacteristics";
+import { ocrLinesFromPage } from "@/lib/hierarchy/apartmentType";
+import { evaluatePolicyPack } from "@/lib/policy/evaluatePolicy";
+import { resolveActivePack } from "@/lib/policy/usePolicyStore";
 import {
   ocrPageImageStream,
   OcrStreamCancelled,
+  scaleSheetOcrMeta,
   type SheetOcrMeta,
 } from "@/lib/api/ocrClient";
 import { projectStore } from "@/lib/data/projectStore";
 import { buildHierarchyFromOverlays } from "@/lib/hierarchy/buildHierarchy";
+import { applyUnitBoundariesFromPage } from "@/lib/hierarchy/applyUnitBoundaries";
 import {
+  addManualUnitIds,
   applyOcrLevelToPage,
+  parseManualUnitIds,
   pickLevelFromOcrMeta,
   pickUnitIdsFromOcrMeta,
+  removeManualUnitId,
   resolveBuildingName,
   resolveFloorPageMeta,
 } from "@/lib/hierarchy/pageLevel";
-import { pdfGraphicsLabel } from "@/lib/pdf/classifyPdfGraphics";
-import { putPageImageBlob, resolvePageImagePath } from "@/lib/pdf/pageImageStore";
-import { PDF_RENDER_DPI } from "@/lib/pdf/renderPdfFirstPage";
-import { rotateOverlayEntity, type PageRotationDeg } from "@/lib/pdf/pageRotation";
-import { rotateImageBlob } from "@/lib/pdf/rotateRaster";
-import { uploadPlanObject } from "@/lib/supabase/plans";
 import {
+  clearOcrLines,
+  removeOcrLineAt,
+  type OcrLineSource,
+} from "@/lib/ocr/removeOcrLine";
+import { pdfGraphicsLabel } from "@/lib/pdf/classifyPdfGraphics";
+import {
+  extractPdfPageText,
+  filterPdfTextToDrawingArea,
+  splitPdfTextByLayoutCrops,
+} from "@/lib/pdf/extractPdfText";
+import { putPageImageBlob, resolvePageImagePath } from "@/lib/pdf/pageImageStore";
+import { inferRenderDpi } from "@/lib/pdf/renderPdfFirstPage";
+import {
+  normalizeRotation,
+  rotateOverlayEntity,
+  scaleOverlayEntity,
+  type PageRotationDeg,
+} from "@/lib/pdf/pageRotation";
+import { rotateImageBlob } from "@/lib/pdf/rotateRaster";
+import { signedPlanUrl, uploadPlanObject } from "@/lib/supabase/plans";
+import {
+  A_PAPER_SIZES_MM,
   calibrateFromScaleAndPaper,
   calibrateFromTwoPoints,
   canonicalScaleText,
+  pixelsPerMeterFromScaleAndPaper,
   formatMeasuredLength,
   lengthFromPixels,
   parseScaleAndPaper,
   pixelDistance,
+  scaleMethodLabel,
   type PointPx,
+  type ScaleInfo,
 } from "@/lib/scale/parseScale";
 import {
   applyScaleFromOcrText,
   cropImageBlob,
+  ensureOcrLinesInPageSpace,
   findDrawingAreaCrop,
   findTitleBlockCrop,
   findTitleBlockRegion,
-  findDrawingAreaRegion,
   formatLayoutRegionSummary,
   layoutCropToPageRect,
   mapCropTileToPage,
+  ocrBboxPoints,
+  ocrFrameFromPixelCrop,
   ocrScaleTextForPage,
-  remapOcrLinesToLayoutRegion,
+  scaleOcrBboxes,
   shouldApplyOcrScale,
 } from "@/lib/scale/layoutRegionCrop";
+import {
+  buildSpatialOcrRooms,
+  unitBoundariesFromEntities,
+} from "@/lib/geometry/ocrSpatialRooms";
 
-type InspectorTabId = "layout" | "ocr" | "scale" | "detect" | "hierarchy";
+type InspectorTabId =
+  | "project"
+  | "layout"
+  | "ocr"
+  | "detect"
+  | "geometry"
+  | "hierarchy"
+  | "policy"
+  | "review";
+
+const INSPECTOR_TABS = new Set<InspectorTabId>([
+  "project",
+  "layout",
+  "ocr",
+  "detect",
+  "geometry",
+  "hierarchy",
+  "policy",
+  "review",
+]);
 
 const EMPTY_SELECTED_IDS: string[] = [];
 
-function PageInfoCard({
-  page,
-  pageCount,
-  levelName,
-}: {
-  page: {
-    graphicsKind?: string | null;
-    graphicsSummary?: string | null;
-    widthPx: number;
-    heightPx: number;
-    pageNumber: number;
-    levelName?: string | null;
-  };
-  pageCount: number;
-  levelName?: string | null;
-}) {
-  return (
-    <div className="rounded border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
-      <p className="font-medium text-slate-800">
-        {page.graphicsKind ? pdfGraphicsLabel(page.graphicsKind) : "Page raster"}
-      </p>
-      {page.graphicsSummary ? (
-        <p className="mt-1 leading-relaxed text-slate-600">{page.graphicsSummary}</p>
-      ) : null}
-      <p className="mt-1">
-        {page.widthPx} × {page.heightPx} px
-      </p>
-      <p className="mt-0.5 text-slate-500">
-        Page {page.pageNumber}
-        {pageCount > 1 ? ` of ${pageCount}` : ""} · {levelName ?? page.levelName ?? `Floor ${page.pageNumber}`}
-      </p>
-    </div>
-  );
-}
-
-function ocrProgressPercent(progress: {
-  current: number;
-  total: number;
-  pageNumber: number;
-  phase: "prepare" | "ocr" | "save";
-}): number {
-  const phaseWeight =
-    progress.phase === "prepare" ? 0.15 : progress.phase === "ocr" ? 0.55 : 0.95;
-  const fraction =
-    progress.pageNumber > 0
-      ? (progress.current - 1 + phaseWeight) / progress.total
-      : 0.05;
-  return Math.min(100, Math.round(100 * fraction));
+function dataUrlToBlob(dataUrl: string): Blob {
+  const [header, data] = dataUrl.split(",", 2);
+  const mime = /data:([^;]+)/.exec(header)?.[1] ?? "image/png";
+  const binary = atob(data);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return new Blob([bytes], { type: mime });
 }
 
 function isAbortError(e: unknown): boolean {
@@ -129,46 +145,34 @@ function isAbortError(e: unknown): boolean {
   );
 }
 
-function ocrLinesToHighlights(meta: SheetOcrMeta | null | undefined) {
+function ocrLinesToHighlights(
+  meta: SheetOcrMeta | null | undefined,
+  source: "title_block" | "drawing",
+) {
   const lines = meta?.lines ?? [];
-  return lines
-    .filter((l) => Array.isArray(l.bbox) && l.bbox.length >= 2 && l.text?.trim())
-    .map((l) => {
-      const pts = l.bbox as [number, number][];
-      const xs = pts.map((p) => p[0]);
-      const ys = pts.map((p) => p[1]);
-      const x0 = Math.min(...xs);
-      const y0 = Math.min(...ys);
-      const x1 = Math.max(...xs);
-      const y1 = Math.max(...ys);
-      return {
+  return lines.flatMap((l) => {
+    if (!l.text?.trim()) return [];
+    const pts = ocrBboxPoints(l.bbox);
+    if (!pts) return [];
+    const xs = pts.map((p) => p[0]);
+    const ys = pts.map((p) => p[1]);
+    const x0 = Math.min(...xs);
+    const y0 = Math.min(...ys);
+    const x1 = Math.max(...xs);
+    const y1 = Math.max(...ys);
+    return [
+      {
         x: x0,
         y: y0,
         width: x1 - x0,
         height: y1 - y0,
         text: l.text.trim(),
         confidence: l.confidence ?? 0,
-      };
-    });
-}
-
-function OcrLinesPreview({ meta, emptyLabel }: { meta: SheetOcrMeta | null | undefined; emptyLabel: string }) {
-  const lines = (meta?.lines ?? []).filter((l) => l.text?.trim());
-  if (!lines.length) {
-    return <p className="text-[11px] leading-relaxed text-slate-500">{emptyLabel}</p>;
-  }
-  return (
-    <ul className="max-h-40 space-y-1 overflow-y-auto rounded border border-slate-100 bg-slate-50/80 p-2 text-[11px] leading-snug text-slate-700">
-      {lines.map((line, idx) => (
-        <li key={`${line.text}-${idx}`} className="flex gap-2">
-          <span className="shrink-0 tabular-nums text-slate-400">
-            {Math.round((line.confidence ?? 0) * 100)}%
-          </span>
-          <span className="min-w-0 break-words">{line.text.trim()}</span>
-        </li>
-      ))}
-    </ul>
-  );
+        source,
+        points: pts.map(([x, y]) => ({ x, y })),
+      },
+    ];
+  });
 }
 
 function normalizePageOcrMeta(sheet: SheetOcrMeta) {
@@ -189,6 +193,8 @@ function normalizePageOcrMeta(sheet: SheetOcrMeta) {
     textHint: sheet.textHint,
     lines: sheet.lines ?? [],
     tiling: sheet.tiling,
+    ocrFrame: sheet.ocrFrame,
+    coordSpace: sheet.coordSpace,
   };
   return {
     ...base,
@@ -203,17 +209,30 @@ interface AnalysisPageClientProps {
 }
 
 export function AnalysisPageClient({ projectId, analysisId }: AnalysisPageClientProps) {
-  const router = useRouter();
   const { analysis, result, scaleInfo, ready } = useAnalysisBundle(analysisId);
   const { project } = useProject(projectId);
   const [toolMode, setToolMode] = useState<ScaleToolMode>("none");
   const [measurePoints, setMeasurePoints] = useState<PointPx[]>([]);
-  const [inspectorTab, setInspectorTab] = useState<InspectorTabId>("layout");
+  const [inspectorTab, setInspectorTab] = useState<InspectorTabId>("project");
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const tab = new URLSearchParams(window.location.search).get("tab");
+    if (tab === "graph") {
+      setInspectorTab("geometry");
+      return;
+    }
+    if (tab && INSPECTOR_TABS.has(tab as InspectorTabId)) {
+      setInspectorTab(tab as InspectorTabId);
+    }
+  }, []);
   const [pageImageUrl, setPageImageUrl] = useState<string | null>(null);
   const [pageImageError, setPageImageError] = useState<string | null>(null);
   const [rotating, setRotating] = useState(false);
   const [rotateError, setRotateError] = useState<string | null>(null);
   const [rotateStatus, setRotateStatus] = useState<string | null>(null);
+  const [dpiBusy, setDpiBusy] = useState(false);
+  const [dpiStatus, setDpiStatus] = useState<string | null>(null);
+  const [dpiError, setDpiError] = useState<string | null>(null);
   const [deletingPageNumber, setDeletingPageNumber] = useState<number | null>(null);
   const [pageDeleteError, setPageDeleteError] = useState<string | null>(null);
   const [policyBusy, setPolicyBusy] = useState(false);
@@ -237,11 +256,11 @@ export function AnalysisPageClient({ projectId, analysisId }: AnalysisPageClient
   } | null>(null);
   const [titleBlockOcrNotice, setTitleBlockOcrNotice] = useState<string | null>(null);
   const [drawingOcrNotice, setDrawingOcrNotice] = useState<string | null>(null);
-  const [autoScaleOcr, setAutoScaleOcr] = useState(true);
+  const [unitInferNotice, setUnitInferNotice] = useState<string | null>(null);
   const ocrAbortRef = useRef<AbortController | null>(null);
-  const autoScaleOcrAttemptedRef = useRef(new Set<string>());
   const appliedOcrScaleKeyRef = useRef<string | null>(null);
   const policyAbortRef = useRef<AbortController | null>(null);
+  const prevAnalysisIdRef = useRef<string | null>(null);
   const resetView = useViewerStore((s) => s.resetView);
   const pageIndex = useViewerStore((s) => s.pageIndex);
   const setPageIndex = useViewerStore((s) => s.setPageIndex);
@@ -254,33 +273,89 @@ export function AnalysisPageClient({ projectId, analysisId }: AnalysisPageClient
     return s.pages[key]?.selectedIds ?? EMPTY_SELECTED_IDS;
   });
   const overlayPages = useOverlayStore((s) => s.pages);
+  const geometryPageKey = useGeometryExtractStore((s) => s.pageKey);
+  const geometryRooms = useGeometryExtractStore((s) => s.rooms);
+  const geometryGraph = useGeometryExtractStore((s) => s.graph);
+  const geometryRoomCount = geometryRooms.length;
+  const geometrySelectedId = useGeometryExtractStore((s) => s.selectedId);
+  const setGeometrySelectedId = useGeometryExtractStore((s) => s.setSelectedId);
   const pageCount = result?.pages.length ?? 0;
   const page = result?.pages[pageIndex];
   const pageNumber = page?.pageNumber ?? 1;
   const pageOcr = page?.ocrMeta;
   const layoutOcrScaleText = useMemo(() => ocrScaleTextForPage(page), [page]);
-  const effectiveOcrScaleText = useMemo(() => {
-    return (
-      layoutOcrScaleText ||
-      (page?.ocrMeta?.lines?.length ? canonicalScaleText(null, null, page.ocrMeta.lines) : null)
-    );
-  }, [layoutOcrScaleText, page?.ocrMeta?.lines]);
   const pageDrawingOcr = page?.drawingOcrMeta;
   const titleBlockRegion = useMemo(() => {
     if (!page) return null;
     return findTitleBlockRegion(analysisId, page.pageNumber, page.widthPx, page.heightPx);
-  }, [analysisId, overlayPages, page]);
-  const drawingAreaRegion = useMemo(() => {
-    if (!page) return null;
-    return findDrawingAreaRegion(analysisId, page.pageNumber, page.widthPx, page.heightPx);
   }, [analysisId, overlayPages, page]);
 
   const resolvedPageLevel = useMemo(
     () => (page && result ? resolveFloorPageMeta(page, result.sourceFileName) : null),
     [page, result],
   );
-  const titleBlockHighlights = useMemo(() => ocrLinesToHighlights(pageOcr), [pageOcr]);
-  const drawingHighlights = useMemo(() => ocrLinesToHighlights(pageDrawingOcr), [pageDrawingOcr]);
+  const titleBlockHighlights = useMemo(() => {
+    if (!page) return [];
+    const crop = findTitleBlockCrop(analysisId, page.pageNumber, page.widthPx, page.heightPx);
+    return ocrLinesToHighlights(
+      ensureOcrLinesInPageSpace(pageOcr, crop, page.widthPx, page.heightPx),
+      "title_block",
+    );
+  }, [analysisId, overlayPages, page, pageOcr]);
+  const drawingHighlights = useMemo(() => {
+    if (!page) return [];
+    const crop = findDrawingAreaCrop(analysisId, page.pageNumber, page.widthPx, page.heightPx);
+    return ocrLinesToHighlights(
+      ensureOcrLinesInPageSpace(pageDrawingOcr, crop, page.widthPx, page.heightPx),
+      "drawing",
+    );
+  }, [analysisId, overlayPages, page, pageDrawingOcr]);
+  const pageSpaceDrawingOcrLines = useMemo(() => {
+    if (!page) return null;
+    const crop = findDrawingAreaCrop(analysisId, page.pageNumber, page.widthPx, page.heightPx);
+    return ensureOcrLinesInPageSpace(pageDrawingOcr, crop, page.widthPx, page.heightPx)?.lines ?? null;
+  }, [analysisId, page, pageDrawingOcr]);
+  const ocrRoomMarkers = useMemo(() => {
+    if (inspectorTab !== "geometry") return [];
+    if (!pageSpaceDrawingOcrLines?.length) return [];
+    const entities = overlayPages[pageKey(analysisId, pageNumber)]?.entities ?? [];
+    const units = unitBoundariesFromEntities(entities);
+    if (!units.length) return [];
+    return buildSpatialOcrRooms(pageSpaceDrawingOcrLines, units).map((r) => ({
+      x: r.centroid.x,
+      y: r.centroid.y,
+      label: r.label,
+      unitLabel: r.unitLabel,
+    }));
+  }, [inspectorTab, pageSpaceDrawingOcrLines, overlayPages, analysisId, pageNumber]);
+
+  const unitGraphView = useUnitGraphView({
+    analysisId,
+    pageNumber,
+    entities: overlayPages[pageKey(analysisId, pageNumber)]?.entities ?? [],
+    pixelsPerMeter: scaleInfo?.pixelsPerMeter ?? null,
+    drawingOcrLines: pageSpaceDrawingOcrLines,
+    ocrLinesForTypes: ocrLinesFromPage(page),
+  });
+
+  const unitGraphOverlay = useMemo(() => {
+    if (inspectorTab !== "geometry") return null;
+    if (!unitGraphView.unitGraph || !unitGraphView.activeUnit) return null;
+    return {
+      unitGraph: unitGraphView.unitGraph,
+      unitId: unitGraphView.activeUnit.id,
+      topology: unitGraphView.activeTopology,
+      selectedId: geometrySelectedId,
+      onSelect: setGeometrySelectedId,
+    };
+  }, [
+    inspectorTab,
+    unitGraphView.unitGraph,
+    unitGraphView.activeUnit,
+    unitGraphView.activeTopology,
+    geometrySelectedId,
+    setGeometrySelectedId,
+  ]);
   const ocrHighlights = useMemo(
     () => [...drawingHighlights, ...titleBlockHighlights],
     [drawingHighlights, titleBlockHighlights],
@@ -306,6 +381,13 @@ export function AnalysisPageClient({ projectId, analysisId }: AnalysisPageClient
       const key = pageKey(analysisId, p.pageNumber);
       entitiesByPage[p.pageNumber] = overlayPages[key]?.entities ?? [];
     }
+    const geometrySource = geometryRooms.length ? geometryRooms : (geometryGraph?.nodes ?? []);
+    const geometryRoomsByPage: Record<number, typeof geometrySource> = {};
+    if (geometryPageKey && geometrySource.length) {
+      const suffix = geometryPageKey.slice(analysisId.length + 1);
+      const pageNo = Number(suffix);
+      if (Number.isFinite(pageNo)) geometryRoomsByPage[pageNo] = geometrySource;
+    }
     return buildHierarchyFromOverlays({
       analysisId,
       projectId,
@@ -316,18 +398,24 @@ export function AnalysisPageClient({ projectId, analysisId }: AnalysisPageClient
       }),
       pages: pageMetas,
       entitiesByPage,
+      geometryRoomsByPage,
+      pixelsPerMeter: scaleInfo?.pixelsPerMeter ?? null,
     });
   }, [
     analysis?.sourceFileName,
     analysisId,
+    geometryGraph,
+    geometryPageKey,
+    geometryRooms,
     overlayPages,
     project?.name,
     projectId,
     result,
+    scaleInfo?.pixelsPerMeter,
   ]);
 
   useEffect(() => {
-    if (inspectorTab === "layout" && toolMode === "none") {
+    if ((inspectorTab === "layout" || inspectorTab === "detect" || inspectorTab === "geometry" || inspectorTab === "review" || inspectorTab === "policy") && toolMode === "none") {
       setOverlayTool("select");
     }
   }, [inspectorTab, toolMode, setOverlayTool]);
@@ -336,16 +424,16 @@ export function AnalysisPageClient({ projectId, analysisId }: AnalysisPageClient
     setPageIndex(0);
     setToolMode("none");
     setMeasurePoints([]);
-    setInspectorTab("scale");
+    const prevAnalysisId = prevAnalysisIdRef.current;
+    prevAnalysisIdRef.current = analysisId;
+    if (prevAnalysisId != null && prevAnalysisId !== analysisId) {
+      setInspectorTab("project");
+    }
     setOverlayTool("pan");
     useOverlayStore.getState().clearSelection();
-    autoScaleOcrAttemptedRef.current.clear();
     appliedOcrScaleKeyRef.current = null;
   }, [analysisId, setPageIndex, setOverlayTool]);
 
-  useEffect(() => {
-    autoScaleOcrAttemptedRef.current.delete(`${analysisId}:${pageNumber}`);
-  }, [analysisId, pageNumber, titleBlockRegion?.widthPx, titleBlockRegion?.heightPx]);
 
   useEffect(() => {
     if (pageCount > 0 && pageIndex >= pageCount) {
@@ -421,9 +509,7 @@ export function AnalysisPageClient({ projectId, analysisId }: AnalysisPageClient
     widthPx: page?.widthPx ?? 0,
     heightPx: page?.heightPx ?? 0,
     enabled: Boolean(page && pageImageUrl && !pageImageError),
-    graphicsKind: page?.graphicsKind,
-    sourceFileName: analysis?.sourceFileName,
-    sourceStoragePath: analysis?.storagePath,
+    drawingOcrMeta: page?.drawingOcrMeta,
     allPages:
       result?.pages.map((p) => ({
         pageNumber: p.pageNumber,
@@ -441,86 +527,56 @@ export function AnalysisPageClient({ projectId, analysisId }: AnalysisPageClient
     setPolicyBusy(true);
     setPolicyError(null);
     try {
+      const pack = resolveActivePack(projectId, project?.policyVersion);
       const key = pageKey(analysisId, page.pageNumber);
       const entities =
-        useOverlayStore.getState().pages[key]?.entities.filter((e) => e.source === "model") ?? [];
-      const regions = entities
-        .filter((e) => e.status !== "rejected")
-        .map((e) => {
-          const bbox = geometryBBox(e.geometry);
-          const g = e.geometry;
-          const polygonPx =
-            g.kind === "polygon" || g.kind === "mask"
-              ? g.points
-              : g.kind === "rect"
-                ? [
-                    { x: g.x, y: g.y },
-                    { x: g.x + g.width, y: g.y },
-                    { x: g.x + g.width, y: g.y + g.height },
-                    { x: g.x, y: g.y + g.height },
-                  ]
-                : g.kind === "polyline"
-                  ? g.points
-                  : bbox
-                    ? [
-                        { x: bbox.x, y: bbox.y },
-                        { x: bbox.x + bbox.width, y: bbox.y },
-                        { x: bbox.x + bbox.width, y: bbox.y + bbox.height },
-                        { x: bbox.x, y: bbox.y + bbox.height },
-                      ]
-                    : [];
-          return {
-            id: e.id,
-            type: e.type,
-            label: e.label,
-            confidence: e.confidence,
-            polygonPx,
-            bboxPx: bbox ?? { x: 0, y: 0, width: 0, height: 0 },
-            attributes: e.attributes,
-          };
-        });
-      const statuses: Record<string, string> = {};
-      for (const e of entities) statuses[e.id] = e.status;
-      const ppm = scaleInfo?.pixelsPerMeter;
-      const mmPerPixel = ppm && ppm > 0 ? 1000 / ppm : null;
-      const { result: next } = await requestPolicyAnalyze(
-        {
-          analysis_id: analysisId,
-          project_id: projectId,
-          source_file_name: analysis?.sourceFileName ?? "plan.pdf",
-          mm_per_pixel: mmPerPixel,
-          calibration_verified: Boolean(scaleInfo?.pixelsPerMeter),
-          width_px: page.widthPx,
-          height_px: page.heightPx,
-          model_id: detection.modelLabel?.split(" ")[0] ?? "overlays",
-          entity_statuses: statuses,
-          policy_version: project?.policyVersion ?? "highlife_v1",
-          regions,
-        },
-        ac.signal,
-      );
+        useOverlayStore.getState().pages[key]?.entities.filter((e) => e.status !== "rejected") ?? [];
+      const sheet = computeApartmentSheet({
+        hierarchy: liveHierarchy,
+        entities,
+        pixelsPerMeter: scaleInfo?.pixelsPerMeter,
+        levelName: page.levelName,
+        ocrLines: [...(page.ocrMeta?.lines ?? []), ...(page.drawingOcrMeta?.lines ?? [])],
+      });
+      const checks = evaluatePolicyPack({
+        pack,
+        analysisId,
+        sheet,
+        hierarchy: liveHierarchy,
+        entities,
+        roomGraph:
+          useGeometryExtractStore.getState().pageKey === key
+            ? useGeometryExtractStore.getState().graph
+            : null,
+      });
       if (ac.signal.aborted) return;
-      await projectStore.setResult(analysisId, next);
+      const current = projectStore.getResult(analysisId) ?? result;
+      if (!current) throw new Error("No analysis result to attach compliance to.");
+      await projectStore.setResult(analysisId, {
+        ...current,
+        complianceResults: checks,
+        policyVersion: pack.version,
+      });
+      if (project && project.policyVersion !== pack.version) {
+        await projectStore.updateProject(projectId, { policyVersion: pack.version });
+      }
+      setOverlayTool("select");
     } catch (e) {
       if (isAbortError(e) || ac.signal.aborted) return;
-      const message = e instanceof Error ? e.message : "Policy check failed";
-      setPolicyError(
-        message.includes("Failed to fetch")
-          ? "Inference API is not running on :8000."
-          : message,
-      );
+      setPolicyError(e instanceof Error ? e.message : "Policy check failed");
     } finally {
       if (policyAbortRef.current === ac) policyAbortRef.current = null;
       setPolicyBusy(false);
     }
   }, [
-    analysis?.sourceFileName,
     analysisId,
-    detection.modelLabel,
+    liveHierarchy,
     page,
-    project?.policyVersion,
+    project,
     projectId,
+    result,
     scaleInfo?.pixelsPerMeter,
+    setOverlayTool,
   ]);
 
   // Resolve IndexedDB / data URL → displayable object URL for the current page.
@@ -567,25 +623,45 @@ export function AnalysisPageClient({ projectId, analysisId }: AnalysisPageClient
     });
   }, []);
 
-  const handleDeleteDrawing = useCallback(() => {
-    if (!window.confirm(`Delete drawing “${analysis?.sourceFileName ?? "this drawing"}”?`)) {
-      return;
-    }
-    void projectStore.deleteAnalysis(analysisId).then(() => {
-      router.push(`/projects/${projectId}`);
-    });
-  }, [analysis?.sourceFileName, analysisId, projectId, router]);
+  const handleScaleToolMode = useCallback((mode: ScaleToolMode) => {
+    setToolMode(mode);
+    setMeasurePoints([]);
+    if (mode !== "none") setOverlayTool("pan");
+  }, [setOverlayTool]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const typing =
+        target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.tagName === "SELECT");
+      if (typing) return;
+      if (e.key === "Escape" && toolMode !== "none") {
+        e.preventDefault();
+        handleScaleToolMode("none");
+        return;
+      }
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      const key = e.key.toLowerCase();
+      if (key === "l") {
+        e.preventDefault();
+        handleScaleToolMode(toolMode === "measure" ? "none" : "measure");
+        return;
+      }
+      if (key === "c") {
+        e.preventDefault();
+        handleScaleToolMode(toolMode === "calibrate" ? "none" : "calibrate");
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [handleScaleToolMode, toolMode]);
 
   const handleDeletePage = useCallback(
     async (target: { pageNumber: number }) => {
       if (!result || result.pages.length <= 1) return;
-      if (
-        !window.confirm(
-          `Delete page ${target.pageNumber} from this drawing? Overlays and OCR for that page will be removed.`,
-        )
-      ) {
-        return;
-      }
       setPageDeleteError(null);
       setDeletingPageNumber(target.pageNumber);
       try {
@@ -607,6 +683,72 @@ export function AnalysisPageClient({ projectId, analysisId }: AnalysisPageClient
       }
     },
     [analysisId, pageIndex, result, setPageIndex],
+  );
+
+  const appendDrawingPagesHook = useAppendDrawingPages({
+    analysisId,
+    projectId,
+    onAdded: ({ firstNewIndex }) => {
+      setPageIndex(firstNewIndex);
+      setPageImageUrl(null);
+    },
+  });
+
+  const persistPageOcr = useCallback(
+    (pages: NonNullable<typeof result>["pages"]) => {
+      if (!result) return;
+      void projectStore.setResult(analysisId, { ...result, pages });
+    },
+    [analysisId, result],
+  );
+
+  const handleDeleteOcrLine = useCallback(
+    (source: OcrLineSource, index: number) => {
+      if (!result || !page) return;
+      const pages = result.pages.map((p) => {
+        if (p.pageNumber !== page.pageNumber) return p;
+        if (source === "title_block") {
+          const nextMeta = removeOcrLineAt(p.ocrMeta, index);
+          const nextPage = { ...p, ocrMeta: nextMeta };
+          return nextMeta ? applyOcrLevelToPage(nextPage, nextMeta) : nextPage;
+        }
+        return { ...p, drawingOcrMeta: removeOcrLineAt(p.drawingOcrMeta, index) };
+      });
+      persistPageOcr(pages);
+    },
+    [page, persistPageOcr, result],
+  );
+
+  const handleClearOcrLines = useCallback(
+    (view: "all" | "title_block" | "drawing") => {
+      if (!result || !page) return;
+      const pages = result.pages.map((p) => {
+        if (p.pageNumber !== page.pageNumber) return p;
+        if (view === "title_block" || view === "all") {
+          p = { ...p, ocrMeta: clearOcrLines(p.ocrMeta) };
+        }
+        if (view === "drawing" || view === "all") {
+          p = { ...p, drawingOcrMeta: clearOcrLines(p.drawingOcrMeta) };
+        }
+        return p;
+      });
+      persistPageOcr(pages);
+    },
+    [page, persistPageOcr, result],
+  );
+
+  const projectExplorer = (
+    <ProjectSidebar
+      pages={result?.pages ?? []}
+      activePageIndex={pageIndex}
+      onSelectPage={setPageIndex}
+      onDeletePage={(p) => void handleDeletePage(p)}
+      deletingPageNumber={deletingPageNumber}
+      pageDeleteError={pageDeleteError}
+      onAddPages={(files) => void appendDrawingPagesHook.appendFiles(files)}
+      addingPages={appendDrawingPagesHook.busy}
+      addPagesError={appendDrawingPagesHook.error}
+    />
   );
 
   const persistScale = useCallback(
@@ -656,7 +798,10 @@ export function AnalysisPageClient({ projectId, analysisId }: AnalysisPageClient
               }
             : p;
         });
-        void projectStore.setResult(analysisId, { ...liveResult, pages });
+        void projectStore.setResult(analysisId, { ...liveResult, pages }, next);
+        setToolMode("none");
+        setMeasurePoints([]);
+        return;
       }
       void projectStore.setScaleInfo(analysisId, next);
       setToolMode("none");
@@ -665,40 +810,23 @@ export function AnalysisPageClient({ projectId, analysisId }: AnalysisPageClient
     [analysisId, pageIndex, result],
   );
 
-  const handleApplyCalibration = useCallback(
-    (opts: { realLength: number; realUnit: "m" | "mm" }) => {
+  const handleApplyTwoPointCalibration = useCallback(
+    (realLength: number, unit: "m" | "mm") => {
       const liveScale = projectStore.getScaleInfo(analysisId) ?? scaleInfo;
       if (!liveScale || measurePoints.length < 2) return;
-      const liveResult = projectStore.getResult(analysisId) ?? result;
-      const current = liveResult?.pages[pageIndex] ?? page;
-      if (!current) return;
-
-      const next = calibrateFromTwoPoints(liveScale, {
-        pointA: measurePoints[0],
-        pointB: measurePoints[1],
-        realLength: opts.realLength,
-        realUnit: opts.realUnit,
-      });
-      persistScale(next, current.pageNumber, { applyAllPages: true });
+      try {
+        const next = calibrateFromTwoPoints(liveScale, {
+          pointA: measurePoints[0],
+          pointB: measurePoints[1],
+          realLength,
+          realUnit: unit,
+        });
+        persistScale(next, page?.pageNumber, { applyAllPages: true });
+      } catch {
+        // Invalid length or coincident points — leave the two-point pick in place.
+      }
     },
-    [analysisId, measurePoints, page, pageIndex, persistScale, result, scaleInfo],
-  );
-
-  const handleApplyDeclaration = useCallback(
-    (opts: { scaleRatio: number; paper: string }) => {
-      const liveScale = projectStore.getScaleInfo(analysisId) ?? scaleInfo;
-      const liveResult = projectStore.getResult(analysisId) ?? result;
-      const currentPage = liveResult?.pages[pageIndex] ?? page;
-      if (!liveScale || !currentPage) return;
-      const next = calibrateFromScaleAndPaper(liveScale, {
-        scaleRatio: opts.scaleRatio,
-        paper: opts.paper,
-        renderWidthPx: currentPage.widthPx,
-        renderHeightPx: currentPage.heightPx,
-      });
-      persistScale(next, currentPage.pageNumber, { applyAllPages: true });
-    },
-    [analysisId, page, pageIndex, persistScale, result, scaleInfo],
+    [analysisId, measurePoints, page?.pageNumber, persistScale, scaleInfo],
   );
 
   const handleApplyOcrScale = useCallback(
@@ -731,14 +859,59 @@ export function AnalysisPageClient({ projectId, analysisId }: AnalysisPageClient
         renderHeightPx: currentPage.heightPx,
       });
 
+        persistScale(
+          {
+            ...next,
+            method: "ocr_scale",
+            confidence: Math.max(next.confidence, currentPage.ocrMeta?.confidence ?? 0.85),
+            scaleLabel: `1:${opts.scaleRatio} @ ${paperCode}`,
+          },
+          currentPage.pageNumber,
+          { applyAllPages: true },
+        );
+    },
+    [analysisId, page, persistScale, scaleInfo],
+  );
+
+  const handleApplyScale = useCallback(
+    (opts: { scaleRatio: number | null; paper: string }) => {
+      const liveScale = projectStore.getScaleInfo(analysisId) ?? scaleInfo;
+      if (!page || !liveScale) return;
+      const paperCode = (opts.paper || liveScale.paperFromPdf || liveScale.paper || "A4").toUpperCase();
+      const scaleRatio = opts.scaleRatio ?? liveScale.scaleRatio;
+      if (
+        scaleRatio === liveScale.scaleRatio &&
+        paperCode === liveScale.paper
+      ) {
+        return;
+      }
+
+      if (scaleRatio) {
+        const next = calibrateFromScaleAndPaper(liveScale, {
+          scaleRatio,
+          paper: paperCode,
+          renderWidthPx: page.widthPx,
+          renderHeightPx: page.heightPx,
+        });
+        persistScale(
+          {
+            ...next,
+            paper: paperCode,
+            method: "manual_scale_paper",
+            scaleLabel: `1:${scaleRatio} @ ${paperCode}`,
+          },
+          page.pageNumber,
+          { applyAllPages: true },
+        );
+        return;
+      }
+
       persistScale(
         {
-          ...next,
-          method: "auto_detect_scale",
-          confidence: Math.max(next.confidence, currentPage.ocrMeta?.confidence ?? 0.85),
-          scaleLabel: `1:${opts.scaleRatio} @ ${paperCode}`,
+          ...liveScale,
+          paper: paperCode,
         },
-        currentPage.pageNumber,
+        page.pageNumber,
         { applyAllPages: true },
       );
     },
@@ -762,6 +935,246 @@ export function AnalysisPageClient({ projectId, analysisId }: AnalysisPageClient
   const cancelOcr = useCallback(() => {
     ocrAbortRef.current?.abort();
   }, []);
+
+  const extractDigitalPdfText = useCallback(
+    async (opts?: {
+      allPages?: boolean;
+      title?: boolean;
+      drawing?: boolean;
+    }) => {
+      const wantTitle = opts?.title ?? true;
+      const wantDrawing = opts?.drawing ?? true;
+      if (!wantTitle && !wantDrawing) {
+        setDrawingOcrError("Select Title and/or Drawing before running Digital PDF.");
+        return;
+      }
+      const liveResult = projectStore.getResult(analysisId) ?? result;
+      if (!liveResult || !analysis) return;
+      const sourceFileName = liveResult.sourceFileName || analysis.sourceFileName || "";
+      if (sourceFileName && !sourceFileName.toLowerCase().endsWith(".pdf")) {
+        setDrawingOcrError("Original file is not a PDF.");
+        return;
+      }
+      const targets = opts?.allPages
+        ? liveResult.pages.filter((p) => p.widthPx >= 1 && p.heightPx >= 1)
+        : liveResult.pages.filter((p) => p.pageNumber === pageNumber && p.widthPx >= 1 && p.heightPx >= 1);
+      if (!targets.length) {
+        setDrawingOcrError("No page available for PDF text.");
+        return;
+      }
+
+      ocrAbortRef.current?.abort();
+      const ac = new AbortController();
+      ocrAbortRef.current = ac;
+      setOcrBusy(true);
+      setOcrKind("both");
+      setTitleBlockOcrError(null);
+      setDrawingOcrError(null);
+      setTitleBlockOcrNotice(null);
+      setDrawingOcrNotice(null);
+      setOcrProgress({
+        current: 0,
+        total: targets.length,
+        pageNumber: targets[0]!.pageNumber,
+        phase: "ocr",
+      });
+      setOcrStatus("Extracting selectable PDF text…");
+
+      try {
+        const byPage = new Map<
+          number,
+          { title: ReturnType<typeof normalizePageOcrMeta>; drawing: ReturnType<typeof normalizePageOcrMeta> }
+        >();
+        let step = 0;
+        let emptyReason: string | null = null;
+        for (const p of targets) {
+          if (ac.signal.aborted) break;
+          step += 1;
+          setOcrProgress({
+            current: step,
+            total: targets.length,
+            pageNumber: p.pageNumber,
+            phase: "ocr",
+          });
+          setOcrStatus(`Page ${p.pageNumber} (${step}/${targets.length}): PDF text…`);
+          const extracted = await extractPdfPageText({
+            analysisId,
+            storagePath: analysis.storagePath ?? "",
+            sourceFileName,
+            pageImagePath: p.imagePath,
+            pageNumber: p.pageNumber,
+            pageWidthPx: p.widthPx,
+            pageHeightPx: p.heightPx,
+            rotationDeg: p.rotationDeg,
+            signal: ac.signal,
+          });
+          if (!extracted.lines.length && extracted.emptyReason) {
+            emptyReason = extracted.emptyReason;
+          }
+          const titleCrop = findTitleBlockCrop(analysisId, p.pageNumber, p.widthPx, p.heightPx);
+          const drawingCrop = findDrawingAreaCrop(analysisId, p.pageNumber, p.widthPx, p.heightPx);
+          if (wantDrawing && !drawingCrop) {
+            throw new Error(
+              "No drawing zone on this page. Run Auto layout or draw the main drawing area, then use Digital PDF with Drawing checked.",
+            );
+          }
+          const split = {
+            title: wantTitle
+              ? splitPdfTextByLayoutCrops(
+                  extracted.lines,
+                  titleCrop,
+                  p.widthPx,
+                  p.heightPx,
+                  null,
+                ).title
+              : [],
+            drawing: wantDrawing
+              ? filterPdfTextToDrawingArea(extracted.lines, drawingCrop, p.widthPx, p.heightPx)
+              : [],
+          };
+          const scaleLines = split.title.length > 0 ? split.title : extracted.lines;
+          const parsed = normalizePageOcrMeta({
+            provider: "pdf-text",
+            coordSpace: "page",
+            confidence: 1,
+            lines: scaleLines,
+            textHint: extracted.textHint,
+            ocrLineCount: scaleLines.length,
+          });
+          byPage.set(p.pageNumber, {
+            title: wantTitle
+              ? {
+                  ...parsed,
+                  lines: split.title,
+                  ocrLineCount: split.title.length,
+                  textHint: split.title.map((l) => l.text).join("\n"),
+                  unitIds: pickUnitIdsFromOcrMeta({
+                    lines: split.title.length ? split.title : scaleLines,
+                  }),
+                }
+              : {
+                  provider: "pdf-text",
+                  coordSpace: "page",
+                  confidence: 1,
+                  lines: [],
+                  ocrLineCount: 0,
+                  textHint: "",
+                },
+            drawing: wantDrawing
+              ? {
+                  provider: "pdf-text",
+                  coordSpace: "page",
+                  confidence: 1,
+                  lines: split.drawing,
+                  ocrLineCount: split.drawing.length,
+                  textHint: split.drawing.map((l) => l.text).join("\n"),
+                  unitIds: pickUnitIdsFromOcrMeta({ lines: split.drawing }),
+                }
+              : {
+                  provider: "pdf-text",
+                  coordSpace: "page",
+                  confidence: 1,
+                  lines: [],
+                  ocrLineCount: 0,
+                  textHint: "",
+                },
+          });
+        }
+
+        if (ac.signal.aborted) {
+          setDrawingOcrNotice("PDF text cancelled.");
+          return;
+        }
+        if (byPage.size === 0) {
+          throw new Error(emptyReason ?? "No selectable text in this PDF. Use Run OCR for scans.");
+        }
+        const hasContent = [...byPage.values()].some(
+          (pair) =>
+            (wantTitle && (pair.title.lines?.length ?? 0) > 0) ||
+            (wantDrawing && (pair.drawing.lines?.length ?? 0) > 0),
+        );
+        if (!hasContent) {
+          throw new Error(emptyReason ?? "No selectable text in this PDF. Use Run OCR for scans.");
+        }
+
+        const latestPages = liveResult.pages.map((p) => {
+          const pair = byPage.get(p.pageNumber);
+          if (!pair) return p;
+          let next = p;
+          if (wantTitle) {
+            next = applyOcrLevelToPage(
+              {
+                ...next,
+                scaleSource: pair.title.scaleText ? "title_block_text" : next.scaleSource,
+                scaleConfidence: pair.title.confidence ?? next.scaleConfidence,
+              },
+              pair.title.lines?.length ? pair.title : next.ocrMeta,
+            );
+            if (pair.title.lines?.length) {
+              next = { ...next, ocrMeta: pair.title };
+            }
+          }
+          if (wantDrawing) {
+            next = {
+              ...next,
+              drawingOcrMeta: pair.drawing.lines?.length ? pair.drawing : null,
+            };
+          }
+          return next;
+        });
+
+        await projectStore.setResult(analysisId, {
+          ...liveResult,
+          pages: latestPages,
+          modelVersions: {
+            ...liveResult.modelVersions,
+            ocr: "pdf-text",
+          },
+        });
+
+        const lineCount = [...byPage.values()].reduce((sum, pair) => {
+          let n = 0;
+          if (wantTitle) n += pair.title.lines?.length ?? 0;
+          if (wantDrawing) n += pair.drawing.lines?.length ?? 0;
+          return sum + n;
+        }, 0);
+        const notice = `Digital PDF: ${byPage.size} page${byPage.size === 1 ? "" : "s"}, ${lineCount} line${lineCount === 1 ? "" : "s"}.`;
+        const targetForScale =
+          latestPages.find((p) => p.pageNumber === pageNumber && ocrScaleTextForPage(p)) ??
+          latestPages.find((p) => ocrScaleTextForPage(p));
+        const parsedScale = targetForScale ? ocrScaleTextForPage(targetForScale) : null;
+        if (targetForScale && parsedScale) {
+          const liveScale = projectStore.getScaleInfo(analysisId) ?? scaleInfo;
+          tryApplyOcrScaleForPage(targetForScale, liveScale);
+          setTitleBlockOcrNotice(`${notice} Scale detected: ${parsedScale} — scale calibrated.`);
+        } else {
+          setTitleBlockOcrNotice(notice);
+        }
+        setDrawingOcrNotice(null);
+      } catch (e) {
+        if (ac.signal.aborted || (e instanceof Error && e.name === "AbortError")) {
+          setDrawingOcrNotice("PDF text cancelled.");
+          return;
+        }
+        setDrawingOcrError(e instanceof Error ? e.message : "Could not extract PDF text.");
+      } finally {
+        setOcrBusy(false);
+        setOcrKind(null);
+        setOcrProgress(null);
+        setOcrStatus(null);
+        setOcrOverlay(null);
+        if (ocrAbortRef.current === ac) ocrAbortRef.current = null;
+      }
+    },
+    [
+      analysis,
+      analysisId,
+      pageNumber,
+      result,
+      scaleInfo,
+      tryApplyOcrScaleForPage,
+    ],
+  );
 
   const cancelPolicyCheck = useCallback(() => {
     policyAbortRef.current?.abort();
@@ -858,9 +1271,14 @@ export function AnalysisPageClient({ projectId, analysisId }: AnalysisPageClient
         setDrawingOcrNotice(null);
       }
       setOcrProgress(null);
+      const uniquePages = new Set(work.flatMap((item) => item.pages.map((p) => p.pageNumber)));
+      const pageHint =
+        uniquePages.size === 1
+          ? `page ${[...uniquePages][0]}`
+          : `${uniquePages.size} pages`;
       setOcrStatus(
         kind === "both"
-          ? "Preparing OCR for all pages…"
+          ? `Preparing title and drawing OCR for ${pageHint}…`
           : `Preparing ${
               work[0].kind === "title_block"
                 ? "title block"
@@ -906,7 +1324,7 @@ export function AnalysisPageClient({ projectId, analysisId }: AnalysisPageClient
             const res = await fetch(url, { signal: ac.signal });
             if (!res.ok) throw new Error(`Could not load page ${p.pageNumber} image for OCR.`);
             const blob = await res.blob();
-            const cropped = await cropImageBlob(blob, crop);
+            const { blob: cropped, pixel } = await cropImageBlob(blob, crop);
             const region = layoutCropToPageRect(crop, p.widthPx, p.heightPx);
             const cropRaster = await createImageBitmap(cropped);
             let cropWidthPx = cropRaster.width;
@@ -924,10 +1342,17 @@ export function AnalysisPageClient({ projectId, analysisId }: AnalysisPageClient
               pageNumber: p.pageNumber,
               phase: "ocr",
             });
+            const ocrOptions = applyOcrResolution(
+              useOcrSettingsStore.getState().getOcrOptions(),
+              runKind === "page" ? "page" : runKind,
+              cropWidthPx,
+              cropHeightPx,
+            );
+            const detHint = ocrOptions.detLimitSideLen ?? ocrOptions.vlMaxSide;
             setOcrStatus(
               kind === "both"
-                ? `Page ${p.pageNumber} (${step}/${totalSteps}): ${regionLabel} OCR…`
-                : `Page ${p.pageNumber} (${step}/${totalSteps}): OCR ${regionLabel}…`,
+                ? `Page ${p.pageNumber} (${step}/${totalSteps}): ${regionLabel} OCR @ ${detHint}px…`
+                : `Page ${p.pageNumber} (${step}/${totalSteps}): OCR ${regionLabel} @ ${detHint}px…`,
             );
             const out = await ocrPageImageStream(
               cropped,
@@ -935,7 +1360,7 @@ export function AnalysisPageClient({ projectId, analysisId }: AnalysisPageClient
               {
                 signal: ac.signal,
                 profile: runKind === "drawing" ? "dense" : "default",
-                ocrOptions: useOcrSettingsStore.getState().getOcrOptions(),
+                ocrOptions,
               },
               {
                 onMeta: (meta) => {
@@ -983,15 +1408,14 @@ export function AnalysisPageClient({ projectId, analysisId }: AnalysisPageClient
                 },
               },
             );
-            const remapped = remapOcrLinesToLayoutRegion(
-              out.sheet,
-              crop,
-              p.widthPx,
-              p.heightPx,
-              out.widthPx,
-              out.heightPx,
-            );
-            ocrByPage.set(p.pageNumber, normalizePageOcrMeta(remapped));
+            const rasterW = out.widthPx > 0 ? out.widthPx : pixel.width;
+            const rasterH = out.heightPx > 0 ? out.heightPx : pixel.height;
+            const remapped = normalizePageOcrMeta({
+              ...scaleOcrBboxes(out.sheet, rasterW, rasterH, pixel.width, pixel.height),
+              coordSpace: "crop",
+              ocrFrame: ocrFrameFromPixelCrop(pixel, p.widthPx, p.heightPx),
+            });
+            ocrByPage.set(p.pageNumber, remapped);
 
             setOcrProgress({
               current: step,
@@ -1147,45 +1571,27 @@ export function AnalysisPageClient({ projectId, analysisId }: AnalysisPageClient
       layoutOcrScaleText ||
       (page.ocrMeta?.lines?.length ? canonicalScaleText(null, null, page.ocrMeta.lines) : null);
 
-    if (effectiveScale && shouldApplyOcrScale(scaleInfo)) {
-      const applyKey = `${attemptKey}:${effectiveScale}`;
-      if (appliedOcrScaleKeyRef.current === applyKey) return;
-      appliedOcrScaleKeyRef.current = applyKey;
-      const applied = applyScaleFromOcrText(effectiveScale, scaleInfo, page, (opts) =>
-        handleApplyOcrScale(opts, page),
-      );
-      if (!applied && appliedOcrScaleKeyRef.current === applyKey) {
-        appliedOcrScaleKeyRef.current = null;
-      }
-      return;
+    if (!effectiveScale || !shouldApplyOcrScale(scaleInfo)) return;
+
+    const applyKey = `${attemptKey}:${effectiveScale}`;
+    if (appliedOcrScaleKeyRef.current === applyKey) return;
+    appliedOcrScaleKeyRef.current = applyKey;
+    const applied = applyScaleFromOcrText(effectiveScale, scaleInfo, page, (opts) =>
+      handleApplyOcrScale(opts, page),
+    );
+    if (!applied && appliedOcrScaleKeyRef.current === applyKey) {
+      appliedOcrScaleKeyRef.current = null;
     }
-
-    if (inspectorTab !== "scale") return;
-    if (!autoScaleOcr || ocrBusy) return;
-    if (effectiveScale) return;
-    if (autoScaleOcrAttemptedRef.current.has(attemptKey)) return;
-    if (!titleBlockRegion) return;
-
-    autoScaleOcrAttemptedRef.current.add(attemptKey);
-    void runLayoutRegionOcr("title_block", {
-      targetPages: [page.pageNumber],
-      applyScale: true,
-    });
   }, [
     analysisId,
-    autoScaleOcr,
     handleApplyOcrScale,
-    inspectorTab,
     layoutOcrScaleText,
-    ocrBusy,
     page?.ocrMeta?.lines,
     page?.ocrMeta?.scaleText,
     page?.pageNumber,
     page?.widthPx,
     page?.heightPx,
-    runLayoutRegionOcr,
     scaleInfo,
-    titleBlockRegion,
   ]);
 
   const handleRotatePage = useCallback(
@@ -1226,6 +1632,7 @@ export function AnalysisPageClient({ projectId, analysisId }: AnalysisPageClient
                   ...p,
                   widthPx: rotated.widthPx,
                   heightPx: rotated.heightPx,
+                  rotationDeg: normalizeRotation((page.rotationDeg ?? 0) + deg),
                   ocrMeta: null,
                   drawingOcrMeta: null,
                 }
@@ -1303,6 +1710,7 @@ export function AnalysisPageClient({ projectId, analysisId }: AnalysisPageClient
                   ...row,
                   widthPx: rotated.widthPx,
                   heightPx: rotated.heightPx,
+                  rotationDeg: normalizeRotation((p.rotationDeg ?? 0) + deg),
                   ocrMeta: null,
                   drawingOcrMeta: null,
                 }
@@ -1341,6 +1749,142 @@ export function AnalysisPageClient({ projectId, analysisId }: AnalysisPageClient
     [analysis, analysisId, page, resetView, result, scaleInfo],
   );
 
+  const handleChangeDpi = useCallback(
+    async (nextDpi: number) => {
+      if (!analysis?.storagePath || !result?.pages.length || !scaleInfo) return;
+      const sourceName = analysis.sourceFileName || "";
+      if (!sourceName.toLowerCase().endsWith(".pdf")) {
+        setDpiError("DPI can only be changed for PDF drawings.");
+        return;
+      }
+      setDpiBusy(true);
+      setDpiError(null);
+      setDpiStatus(`Re-rendering at ${nextDpi} DPI…`);
+      try {
+        const ext = sourceName.toLowerCase().endsWith(".pdf") ? ".pdf" : "";
+        const url = await signedPlanUrl(`${analysis.storagePath}/source${ext}`);
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`Could not download the original PDF (${res.status}).`);
+        const blob = await res.blob();
+        const { putSourcePdf } = await import("@/lib/pdf/sourcePdfStore");
+        await putSourcePdf(analysisId, blob);
+        const file = new File([blob], sourceName, { type: "application/pdf" });
+        const { renderAllPdfPagesToPng } = await import("@/lib/pdf/renderPdfFirstPage");
+        const rendered = await renderAllPdfPagesToPng(file, {
+          dpi: nextDpi,
+          rotationForPage: (pageNumber) =>
+            result.pages.find((p) => p.pageNumber === pageNumber)?.rotationDeg ?? 0,
+          onProgress: (done, total) => {
+            setDpiStatus(`Rendering page ${done} of ${total} at ${nextDpi} DPI…`);
+          },
+        });
+        const byNumber = new Map(rendered.map((p) => [p.pageNumber, p]));
+        const nextPages = [];
+        for (const oldPage of result.pages) {
+          const neu = byNumber.get(oldPage.pageNumber);
+          if (!neu) {
+            nextPages.push(oldPage);
+            continue;
+          }
+          const png = dataUrlToBlob(neu.dataUrl);
+          await putPageImageBlob(analysisId, oldPage.pageNumber, png);
+          await uploadPlanObject(
+            `${analysis.storagePath}/page-${oldPage.pageNumber}.png`,
+            png,
+            "image/png",
+          );
+          const sx = oldPage.widthPx > 0 ? neu.widthPx / oldPage.widthPx : 1;
+          const sy = oldPage.heightPx > 0 ? neu.heightPx / oldPage.heightPx : 1;
+          const key = pageKey(analysisId, oldPage.pageNumber);
+          const entities = useOverlayStore.getState().pages[key]?.entities ?? [];
+          const nextEntities = entities.map((entity) => scaleOverlayEntity(entity, sx, sy));
+          useOverlayStore.getState().loadPageEntities(nextEntities, {
+            analysisId,
+            pageNumber: oldPage.pageNumber,
+          });
+          await projectStore.setOverlays(analysisId, oldPage.pageNumber, nextEntities);
+          const ocrMeta = oldPage.ocrMeta
+            ? (scaleSheetOcrMeta(
+                oldPage.ocrMeta,
+                oldPage.widthPx,
+                oldPage.heightPx,
+                neu.widthPx,
+                neu.heightPx,
+              ) as typeof oldPage.ocrMeta)
+            : oldPage.ocrMeta;
+          const drawingOcrMeta = oldPage.drawingOcrMeta
+            ? (scaleSheetOcrMeta(
+                oldPage.drawingOcrMeta,
+                oldPage.widthPx,
+                oldPage.heightPx,
+                neu.widthPx,
+                neu.heightPx,
+              ) as typeof oldPage.drawingOcrMeta)
+            : oldPage.drawingOcrMeta;
+          nextPages.push({
+            ...oldPage,
+            widthPx: neu.widthPx,
+            heightPx: neu.heightPx,
+            ocrMeta,
+            drawingOcrMeta,
+          });
+        }
+        const first = nextPages[0];
+        let pixelsPerMeter = scaleInfo.pixelsPerMeter;
+        if (scaleInfo.scaleRatio && scaleInfo.paper && first) {
+          try {
+            pixelsPerMeter = pixelsPerMeterFromScaleAndPaper({
+              scaleRatio: scaleInfo.scaleRatio,
+              paper: scaleInfo.paper,
+              renderWidthPx: first.widthPx,
+              renderHeightPx: first.heightPx,
+            });
+          } catch {
+            const oldFirst = result.pages[0];
+            if (oldFirst?.widthPx && pixelsPerMeter) {
+              pixelsPerMeter = pixelsPerMeter * (first.widthPx / oldFirst.widthPx);
+            }
+          }
+        } else if (pixelsPerMeter && result.pages[0]?.widthPx && first) {
+          pixelsPerMeter = pixelsPerMeter * (first.widthPx / result.pages[0].widthPx);
+        }
+        const nextScale = { ...scaleInfo, pixelsPerMeter };
+        const mPerPx =
+          nextScale.pixelsPerMeter && nextScale.pixelsPerMeter > 0
+            ? 1 / nextScale.pixelsPerMeter
+            : undefined;
+        await projectStore.setResult(analysisId, {
+          ...result,
+          pages: nextPages.map((p) => ({
+            ...p,
+            scaleMPerPixel: mPerPx,
+            scaleSource: nextScale.method,
+            scaleConfidence: nextScale.confidence,
+          })),
+        });
+        await projectStore.setScaleInfo(analysisId, nextScale);
+        if (page) {
+          const freshUrl = await resolvePageImagePath(
+            page.imagePath,
+            analysisId,
+            page.pageNumber,
+          );
+          setPageImageUrl((prev) => {
+            if (prev?.startsWith("blob:") && prev !== freshUrl) URL.revokeObjectURL(prev);
+            return freshUrl;
+          });
+        }
+        resetView();
+        setDpiStatus(null);
+      } catch (e) {
+        setDpiError(e instanceof Error ? e.message : "Could not change DPI.");
+      } finally {
+        setDpiBusy(false);
+      }
+    },
+    [analysis, analysisId, page, resetView, result, scaleInfo],
+  );
+
   const measureLabel = useMemo(() => {
     if (
       toolMode !== "measure" ||
@@ -1356,7 +1900,7 @@ export function AnalysisPageClient({ projectId, analysisId }: AnalysisPageClient
 
   if (ready && !analysis) {
     return (
-      <WorkspaceShell statusText="Drawing not found">
+      <WorkspaceShell>
         <div className="flex h-full items-center justify-center p-8">
           <div className="text-center">
             <p className="text-slate-600">Drawing not found.</p>
@@ -1371,7 +1915,7 @@ export function AnalysisPageClient({ projectId, analysisId }: AnalysisPageClient
 
   if (!analysis) {
     return (
-      <WorkspaceShell statusText="Loading…">
+      <WorkspaceShell>
         <div className="flex h-full items-center justify-center text-sm text-slate-500">
           Loading drawing…
         </div>
@@ -1379,22 +1923,30 @@ export function AnalysisPageClient({ projectId, analysisId }: AnalysisPageClient
     );
   }
 
-  const hasLegacyReview =
-    (result?.units.length ?? 0) > 0 || (result?.spaces.length ?? 0) > 0;
-
   const scaleLabel =
     scaleInfo?.pixelsPerMeter != null
       ? scaleInfo.scaleRatio != null
         ? `1:${scaleInfo.scaleRatio}${scaleInfo.paper ? ` @ ${scaleInfo.paper}` : ""}`
         : `${scaleInfo.pixelsPerMeter.toFixed(1)} px/m`
       : "Scale unknown";
-
   const graphicsLabel = page?.graphicsKind ? pdfGraphicsLabel(page.graphicsKind) : null;
   const pageStatus =
     pageCount > 0 ? `Page ${pageIndex + 1} of ${pageCount}` : "No pages";
+  const renderDpi = inferRenderDpi(
+    page?.widthPx ?? 0,
+    page?.heightPx ?? 0,
+    scaleInfo?.pageWidthPt ?? 0,
+    scaleInfo?.pageHeightPt ?? 0,
+  );
+  const canChangeDpi = Boolean(
+    analysis.storagePath &&
+      (analysis.sourceFileName || "").toLowerCase().endsWith(".pdf") &&
+      page?.graphicsKind !== "image",
+  );
 
   const inspectorTabs = [
-    { id: "layout", label: "Layout", title: "Sheet layout and regions" },
+    { id: "project", label: "Project", title: "Projects and drawings" },
+    { id: "layout", label: "Layout", title: "Sheet zones" },
     {
       id: "ocr",
       label: "OCR",
@@ -1406,7 +1958,6 @@ export function AnalysisPageClient({ projectId, analysisId }: AnalysisPageClient
             (page?.drawingOcrMeta?.ocrLineCount ?? page?.drawingOcrMeta?.lines?.length ?? 0)
           : null,
     },
-    { id: "scale", label: "Scale", title: "Scale calibration" },
     {
       id: "detect",
       label: "Detect",
@@ -1414,388 +1965,174 @@ export function AnalysisPageClient({ projectId, analysisId }: AnalysisPageClient
       badge: detection.regionCount > 0 ? detection.regionCount : null,
     },
     {
+      id: "geometry",
+      label: "Geometry",
+      title: "Rooms, adjacency graph, and topology",
+      badge:
+        geometryPageKey === pageKey(analysisId, pageNumber) && geometryRoomCount > 0
+          ? geometryRoomCount
+          : null,
+    },
+    {
       id: "hierarchy",
       label: "Tree",
       title: "Building hierarchy",
       badge: liveHierarchy?.units.length ? liveHierarchy.units.length : null,
+    },
+    {
+      id: "policy",
+      label: "Policy",
+      title: "Design policy packs and compliance",
+      badge: result?.complianceResults.length ? result.complianceResults.length : null,
+    },
+    {
+      id: "review",
+      label: "Review",
+      title: "Units, policy, and export",
+      badge:
+        (result?.complianceResults.length ?? 0) > 0
+          ? result!.complianceResults.length
+          : (result?.unitSummaries.length ?? 0) > 0
+            ? result!.unitSummaries.length
+            : null,
     },
   ];
 
   const handleInspectorTabChange = (id: string) => {
     const tab = id as InspectorTabId;
     setInspectorTab(tab);
-    if (tab === "detect" || tab === "hierarchy" || tab === "layout" || tab === "ocr") {
-      setToolMode("none");
-      setMeasurePoints([]);
-      if (tab === "layout") {
-        setOverlayTool("select");
-        setLayoutDrawType(null);
-      } else {
-        setOverlayTool("pan");
-        setLayoutDrawType(null);
-      }
+    if (tab === "project") return;
+    if (tab === "geometry") {
+      useGeometryExtractStore.getState().setShowOverlays(true);
+    }
+    if (toolMode !== "none") return;
+    if (tab === "layout" || tab === "review" || tab === "policy" || tab === "geometry") {
+      setOverlayTool("select");
+      setLayoutDrawType(null);
+    } else {
+      setOverlayTool("select");
+      setLayoutDrawType(null);
     }
   };
 
   const inspectorTitle =
-    inspectorTab === "layout"
-      ? "Layout"
-      : inspectorTab === "ocr"
-        ? "PaddleOCR"
-        : inspectorTab === "scale"
-          ? "Scale"
+    inspectorTab === "project"
+      ? "Project"
+      : inspectorTab === "layout"
+        ? "Layout"
+        : inspectorTab === "ocr"
+          ? "PaddleOCR"
           : inspectorTab === "detect"
             ? "Detect"
-            : "Hierarchy";
+            : inspectorTab === "geometry"
+              ? "Geometry"
+              : inspectorTab === "policy"
+                ? "Policy"
+                : inspectorTab === "review"
+                  ? "Review"
+                  : "Hierarchy";
 
   return (
     <WorkspaceShell
-      statusText={[analysis.sourceFileName, pageStatus, graphicsLabel, scaleLabel]
-        .filter(Boolean)
-        .join(" · ")}
-      leftPanelTitle="Pages"
-      leftPanel={
-        <>
-          <PageThumbnailStrip
-            analysisId={analysisId}
-            pages={result?.pages ?? []}
-            activeIndex={pageIndex}
-            onSelect={setPageIndex}
-            onDeletePage={(p) => void handleDeletePage(p)}
-            deletingPageNumber={deletingPageNumber}
-            size="small"
-          />
-          {pageDeleteError ? (
-            <p className="px-2 pb-2 text-[11px] leading-relaxed text-red-600">{pageDeleteError}</p>
-          ) : null}
-        </>
+      inspectorHasRail
+      projectPanel={projectExplorer}
+      statusText={[pageStatus, graphicsLabel, scaleLabel].filter(Boolean).join(" · ")}
+      toolbarPinned={toolMode !== "none" || rotating || dpiBusy}
+      toolbar={
+        <EditorToolbar
+          pageCount={pageCount}
+          onRotateCw={() => void handleRotatePage(90)}
+          onRotateCcw={() => void handleRotatePage(270)}
+          onRotateAllCw={() => void handleRotateAllPages(90)}
+          onRotateAllCcw={() => void handleRotateAllPages(270)}
+          rotating={rotating || dpiBusy}
+          rotateStatus={rotateStatus ?? dpiStatus}
+          scaleTools={{
+            mode: toolMode,
+            onModeChange: handleScaleToolMode,
+            measureLabel:
+              measureLabel ??
+              (toolMode === "measure" && measurePoints.length >= 2
+                ? `${pixelDistance(measurePoints[0], measurePoints[1]).toFixed(1)} px`
+                : null),
+            calibrateReady: toolMode === "calibrate" && measurePoints.length >= 2,
+            onApplyCalibration: handleApplyTwoPointCalibration,
+          }}
+        />
+      }
+      sidebar={
+        <AnalysisRightSidebar
+          drawingInfo={
+            scaleInfo ? (
+              <ScalePanel
+                scaleInfo={scaleInfo}
+                compact
+                graphicsKind={page?.graphicsKind}
+                widthPx={page?.widthPx}
+                heightPx={page?.heightPx}
+                renderDpi={renderDpi}
+                canChangeDpi={canChangeDpi}
+                dpiBusy={dpiBusy}
+                dpiStatus={dpiStatus}
+                dpiError={dpiError}
+                onApplyDpi={(dpi) => void handleChangeDpi(dpi)}
+                onApplyScale={handleApplyScale}
+              />
+            ) : (
+              <p className="text-xs text-slate-500">No scale data available.</p>
+            )
+          }
+          overlayView={
+            <OverlayViewSection
+              hasOcr={
+                ((page?.ocrMeta?.ocrLineCount ?? page?.ocrMeta?.lines?.length ?? 0) +
+                  (page?.drawingOcrMeta?.ocrLineCount ??
+                    page?.drawingOcrMeta?.lines?.length ??
+                    0)) >
+                0
+              }
+            />
+          }
+        />
       }
       inspectorTitle={inspectorTitle}
       inspector={
-        <div className="flex min-h-0 flex-1 flex-col">
+        <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
         <VerticalInspectorTabs
           tabs={inspectorTabs}
           activeId={inspectorTab}
           onChange={handleInspectorTabChange}
-          footer={
-            <button
-              type="button"
-              className="w-full rounded border border-red-200 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50"
-              onClick={handleDeleteDrawing}
-            >
-              Delete drawing
-            </button>
-          }
         >
-          {inspectorTab === "layout" ? (
-            <>
-              {page ? (
-                <PageInfoCard
-                  page={page}
-                  pageCount={pageCount}
-                  levelName={resolvedPageLevel?.levelName}
-                />
-              ) : null}
+          {inspectorTab === "project" ? (
+            projectExplorer
+          ) : inspectorTab === "layout" ? (
+            <div className="space-y-3">
               <ManualLayoutPanel
-                  analysisId={analysisId}
-                  pageNumber={page?.pageNumber ?? 1}
-                  pageWidthPx={page?.widthPx ?? 0}
-                  pageHeightPx={page?.heightPx ?? 0}
-                  disabled={ocrBusy || detection.detecting}
-                />
-              {page ? (
-                <LayoutRegionInspector
-                  analysisId={analysisId}
-                  pageNumber={page.pageNumber}
-                  pageWidthPx={page.widthPx}
-                  pageHeightPx={page.heightPx}
-                />
-              ) : null}
-                <div className="space-y-2 rounded border border-slate-200 px-3 py-2">
-                  <p className="text-[11px] font-medium text-slate-700">Sheet layout (YOLO)</p>
-                  <p className="text-[11px] leading-relaxed text-slate-500">
-                    Optional automatic detection of drawing area, legend block, and title block
-                    using{" "}
-                    <a
-                      href="https://huggingface.co/GreenMap/yolo11x-blueprint-layout-detector"
-                      target="_blank"
-                      rel="noreferrer"
-                      className="text-brand-600 hover:underline"
-                    >
-                      GreenMap layout detector
-                    </a>
-                    . Use manual layout above if this fails.
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      className="flex-1 rounded border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-50 disabled:opacity-50"
-                      disabled={detection.detecting || ocrBusy || !pageImageUrl}
-                      onClick={() => void detection.runLayoutDetect()}
-                    >
-                      {detection.detecting && !detection.progress?.batchTotal
-                        ? detection.progress?.label ?? "Detecting layout…"
-                        : "Detect layout (this page)"}
-                    </button>
-                    <button
-                      type="button"
-                      className="flex-1 rounded border border-brand-300 bg-white px-3 py-1.5 text-xs font-medium text-brand-900 hover:bg-brand-50 disabled:opacity-50"
-                      disabled={detection.detecting || ocrBusy || pageCount < 1}
-                      onClick={() => void detection.runLayoutDetectAllPages()}
-                    >
-                      {detection.detecting && detection.progress?.batchTotal
-                        ? detection.progress?.label ?? "Detecting layout…"
-                        : `Detect layout (all ${pageCount} pages)`}
-                    </button>
-                    {detection.detecting ? (
-                      <button
-                        type="button"
-                        className="rounded border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
-                        onClick={() => detection.cancelDetect()}
-                      >
-                        Cancel
-                      </button>
-                    ) : null}
-                  </div>
-                  {detection.detecting &&
-                  detection.progress &&
-                  (detection.progress.batchTotal ?? detection.progress.total) > 0 ? (
-                    <div className="space-y-1">
-                      <div className="h-1.5 overflow-hidden rounded-full bg-slate-200">
-                        <div
-                          className="h-full rounded-full bg-brand-600 transition-all"
-                          style={{
-                            width: `${
-                              (100 * detection.progress.index) /
-                              Math.max(
-                                1,
-                                detection.progress.batchTotal ?? detection.progress.total,
-                              )
-                            }%`,
-                          }}
-                        />
-                      </div>
-                      <p className="text-[11px] leading-relaxed text-slate-600">
-                        {detection.progress.label}
-                      </p>
-                    </div>
-                  ) : null}
-                  {detection.detectError && inspectorTab === "layout" ? (
-                    <p className="text-[11px] leading-relaxed text-red-600">{detection.detectError}</p>
-                  ) : detection.detectWarning && inspectorTab === "layout" ? (
-                    <p className="text-[11px] leading-relaxed text-amber-700">{detection.detectWarning}</p>
-                  ) : null}
-                </div>
-                <div className="space-y-2 rounded border border-brand-200 bg-brand-50/40 px-3 py-2">
-                  <p className="text-[11px] font-medium text-slate-700">OCR all pages</p>
-                  <p className="text-[11px] leading-relaxed text-slate-500">
-                    Run <strong>title block</strong> and <strong>drawing area</strong> OCR on
-                    every page that has layout regions ({pageCount} page{pageCount === 1 ? "" : "s"}).
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      className="flex-1 rounded border border-brand-300 bg-white px-3 py-1.5 text-xs font-medium text-brand-900 hover:bg-brand-50 disabled:opacity-50"
-                      disabled={ocrBusy || !pageImageUrl || pageCount < 1}
-                      onClick={() => void runAllPagesOcr()}
-                    >
-                      {ocrBusy && ocrKind === "both"
-                        ? ocrStatus ?? "OCR all pages…"
-                        : "OCR title block + drawing (all pages)"}
-                    </button>
-                    {ocrBusy && ocrKind === "both" ? (
-                      <button
-                        type="button"
-                        className="rounded border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
-                        onClick={cancelOcr}
-                      >
-                        Cancel
-                      </button>
-                    ) : null}
-                  </div>
-                  {ocrBusy && ocrKind === "both" && ocrProgress && ocrProgress.total > 0 ? (
-                    <div className="space-y-1">
-                      <div className="h-1.5 overflow-hidden rounded-full bg-slate-200">
-                        <div
-                          className="h-full rounded-full bg-brand-600 transition-all"
-                          style={{ width: `${ocrProgressPercent(ocrProgress)}%` }}
-                        />
-                      </div>
-                      <p className="text-[11px] leading-relaxed text-slate-600">{ocrStatus}</p>
-                    </div>
-                  ) : null}
-                </div>
-                <div className="space-y-2 rounded border border-slate-200 px-3 py-2">
-                  <p className="text-[11px] font-medium text-slate-700">Title block OCR</p>
-                  <p className="text-[11px] leading-relaxed text-slate-500">
-                    Reads sheet metadata from the detected <strong>title_block</strong> layout
-                    region only — scale (<code className="text-[10px]">1:100 @ A1</code>), level,
-                    sheet title, unit ids. Crops the same {PDF_RENDER_DPI} DPI page image used by
-                    the viewer and layout detector.
-                  </p>
-                  {titleBlockRegion ? (
-                    <p className="rounded border border-teal-100 bg-teal-50/60 px-2 py-1.5 text-[11px] text-teal-900">
-                      Selected: {formatLayoutRegionSummary(titleBlockRegion)}
-                    </p>
-                  ) : (
-                    <p className="text-[11px] leading-relaxed text-amber-700">
-                      No title block region yet — draw one manually or run layout detection.
-                    </p>
-                  )}
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      className="flex-1 rounded border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-50 disabled:opacity-50"
-                      disabled={ocrBusy || !pageImageUrl}
-                      onClick={() => void runTitleBlockOcr()}
-                    >
-                      {ocrBusy && ocrKind === "title_block"
-                        ? ocrStatus ?? "OCR title block…"
-                        : "OCR title block"}
-                    </button>
-                    {layoutOcrScaleText && scaleInfo ? (
-                      <button
-                        type="button"
-                        className="rounded border border-brand-300 px-3 py-1.5 text-xs font-medium text-brand-800 hover:bg-brand-50 disabled:opacity-50"
-                        disabled={ocrBusy}
-                        onClick={() =>
-                          applyScaleFromOcrText(
-                            layoutOcrScaleText,
-                            scaleInfo,
-                            page,
-                            handleApplyOcrScale,
-                          )
-                        }
-                      >
-                        Apply scale
-                      </button>
-                    ) : null}
-                    {ocrBusy && ocrKind === "title_block" ? (
-                      <button
-                        type="button"
-                        className="rounded border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
-                        onClick={cancelOcr}
-                      >
-                        Cancel
-                      </button>
-                    ) : null}
-                  </div>
-                  {ocrBusy && ocrKind === "title_block" && ocrProgress && ocrProgress.total > 0 ? (
-                    <div className="space-y-1">
-                      <div className="h-1.5 overflow-hidden rounded-full bg-slate-200">
-                        <div
-                          className="h-full rounded-full bg-brand-600 transition-all"
-                          style={{ width: `${ocrProgressPercent(ocrProgress)}%` }}
-                        />
-                      </div>
-                      <p className="text-[11px] leading-relaxed text-slate-600">{ocrStatus}</p>
-                    </div>
-                  ) : null}
-                  {titleBlockOcrNotice ? (
-                    <p className="text-[11px] leading-relaxed text-emerald-700">{titleBlockOcrNotice}</p>
-                  ) : null}
-                  {titleBlockOcrError ? (
-                    <p className="text-[11px] leading-relaxed text-red-600">{titleBlockOcrError}</p>
-                  ) : pageOcr ? (
-                    <div className="space-y-2 text-[11px] leading-relaxed text-slate-600">
-                      {resolvedPageLevel?.levelName || pageOcr?.levelName ? (
-                        <p>Level: {resolvedPageLevel?.levelName ?? pageOcr?.levelName}</p>
-                      ) : null}
-                      {pageOcr.scaleText ? <p>Scale: {pageOcr.scaleText}</p> : null}
-                      {pageOcr.title ? <p className="truncate">Title: {pageOcr.title}</p> : null}
-                      {pageOcr.unitIds && pageOcr.unitIds.length > 0 ? (
-                        <p>Units: {pageOcr.unitIds.join(", ")}</p>
-                      ) : null}
-                      {pageOcr.textHint ? (
-                        <p className="whitespace-pre-wrap text-slate-500">{pageOcr.textHint}</p>
-                      ) : null}
-                      <OcrLinesPreview
-                        meta={pageOcr}
-                        emptyLabel="No OCR lines returned for the title block."
-                      />
-                      <p className="text-slate-400">
-                        {pageOcr.ocrLineCount ?? pageOcr.lines?.length ?? 0} lines ·{" "}
-                        {pageOcr.provider}
-                      </p>
-                    </div>
-                  ) : (
-                    <p className="text-[11px] leading-relaxed text-slate-500">
-                      Requires layout detection. Enable with{" "}
-                      <code className="text-[10px]">PADDLE_OCR_ENABLED=true</code>.
-                    </p>
-                  )}
-                </div>
-                <div className="space-y-2 rounded border border-slate-200 px-3 py-2">
-                  <p className="text-[11px] font-medium text-slate-700">Drawing area OCR</p>
-                  <p className="text-[11px] leading-relaxed text-slate-500">
-                    Reads text inside the detected <strong>main_floorplan</strong> layout region —
-                    room labels, dimensions, and notes. Crops larger than PaddleOCR&apos;s 960px
-                    default are OCR&apos;d in overlapping tiles (same pattern as YOLO inference).
-                  </p>
-                  {drawingAreaRegion ? (
-                    <p className="rounded border border-sky-100 bg-sky-50/60 px-2 py-1.5 text-[11px] text-sky-900">
-                      Selected: {formatLayoutRegionSummary(drawingAreaRegion)}
-                    </p>
-                  ) : (
-                    <p className="text-[11px] leading-relaxed text-amber-700">
-                      No drawing area region yet — draw one manually or run layout detection.
-                    </p>
-                  )}
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      className="flex-1 rounded border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-50 disabled:opacity-50"
-                      disabled={ocrBusy || !pageImageUrl}
-                      onClick={() => void runDrawingAreaOcr()}
-                    >
-                      {ocrBusy && ocrKind === "drawing"
-                        ? ocrStatus ?? "OCR drawing area…"
-                        : "OCR drawing area"}
-                    </button>
-                    {ocrBusy && ocrKind === "drawing" ? (
-                      <button
-                        type="button"
-                        className="rounded border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
-                        onClick={cancelOcr}
-                      >
-                        Cancel
-                      </button>
-                    ) : null}
-                  </div>
-                  {ocrBusy && ocrKind === "drawing" && ocrProgress && ocrProgress.total > 0 ? (
-                    <div className="space-y-1">
-                      <div className="h-1.5 overflow-hidden rounded-full bg-slate-200">
-                        <div
-                          className="h-full rounded-full bg-sky-600 transition-all"
-                          style={{ width: `${ocrProgressPercent(ocrProgress)}%` }}
-                        />
-                      </div>
-                      <p className="text-[11px] leading-relaxed text-slate-600">{ocrStatus}</p>
-                    </div>
-                  ) : null}
-                  {drawingOcrNotice ? (
-                    <p className="text-[11px] leading-relaxed text-emerald-700">{drawingOcrNotice}</p>
-                  ) : null}
-                  {drawingOcrError ? (
-                    <p className="text-[11px] leading-relaxed text-red-600">{drawingOcrError}</p>
-                  ) : pageDrawingOcr ? (
-                    <div className="space-y-2 text-[11px] leading-relaxed text-slate-600">
-                      <OcrLinesPreview
-                        meta={pageDrawingOcr}
-                        emptyLabel="No OCR lines returned for the drawing area."
-                      />
-                      <p className="text-slate-400">
-                        {pageDrawingOcr.ocrLineCount ?? pageDrawingOcr.lines?.length ?? 0} lines ·{" "}
-                        {pageDrawingOcr.provider}
-                      </p>
-                    </div>
-                  ) : (
-                    <p className="text-[11px] leading-relaxed text-slate-500">
-                      Requires layout detection to find the drawing area first.
-                    </p>
-                  )}
-                </div>
-              </>
+                analysisId={analysisId}
+                pageNumber={page?.pageNumber ?? 1}
+                pageWidthPx={page?.widthPx ?? 0}
+                pageHeightPx={page?.heightPx ?? 0}
+                pageCount={pageCount}
+                disabled={ocrBusy || detection.detecting || !pageImageUrl}
+                detectBusy={detection.detecting}
+                detectLabel={detection.progress?.label}
+                detectProgress={
+                  detection.progress
+                    ? {
+                        index: detection.progress.index,
+                        total: detection.progress.batchTotal ?? detection.progress.total,
+                      }
+                    : null
+                }
+                detectError={detection.detectError}
+                detectWarning={detection.detectWarning}
+                onAutoLayout={(scope) => {
+                  if (scope === "all") void detection.runLayoutDetectAllPages();
+                  else void detection.runLayoutDetect();
+                }}
+                onCancelDetect={() => detection.cancelDetect()}
+              />
+            </div>
             ) : inspectorTab === "ocr" ? (
               <OcrPanel
                 pageNumber={page?.pageNumber ?? 1}
@@ -1808,102 +2145,49 @@ export function AnalysisPageClient({ projectId, analysisId }: AnalysisPageClient
                 ocrProgress={ocrProgress}
                 ocrNotice={titleBlockOcrNotice || drawingOcrNotice}
                 ocrError={titleBlockOcrError || drawingOcrError}
+                graphicsKind={page?.graphicsKind}
                 onRunPageOcr={(profile) => void runPageOcr(profile)}
                 onRunTitleBlockOcr={() => void runTitleBlockOcr([pageNumber], true)}
                 onRunDrawingAreaOcr={() => void runDrawingAreaOcr([pageNumber])}
                 onRunAllPagesOcr={() => void runAllPagesOcr()}
+                onRunOcr={({ title, drawing, allPages }) => {
+                  const run = ocrRunFromChecks({
+                    title,
+                    drawing,
+                    allPages,
+                    pageNumber,
+                  });
+                  if (run) void runLayoutRegionOcr(run.kind, run);
+                }}
+                onExtractPdfText={(opts) => void extractDigitalPdfText(opts)}
                 onCancelOcr={cancelOcr}
+                onDeleteOcrLine={handleDeleteOcrLine}
+                onClearOcrLines={handleClearOcrLines}
+                activeScaleLabel={scaleLabel}
+                scaleMethod={scaleInfo ? scaleMethodLabel(scaleInfo.method) : null}
                 onApplyDetectedScale={
-                  page?.ocrMeta?.scaleText && scaleInfo
+                  layoutOcrScaleText || page?.ocrMeta?.scaleText
                     ? () => {
-                        if (page?.ocrMeta?.scaleText) {
-                          applyScaleFromOcrText(page.ocrMeta.scaleText, scaleInfo, page, (opts) =>
+                        const text = layoutOcrScaleText || page?.ocrMeta?.scaleText;
+                        if (!text || !page) return false;
+                        try {
+                          return applyScaleFromOcrText(text, scaleInfo, page, (opts) =>
                             handleApplyOcrScale(opts, page),
                           );
+                        } catch {
+                          return false;
                         }
                       }
                     : undefined
                 }
               />
-            ) : inspectorTab === "scale" ? (
-              <>
-                {scaleInfo ? (
-                  <ScalePanel
-                    scaleInfo={scaleInfo}
-                    fileName={analysis.sourceFileName}
-                    compact
-                    toolMode={toolMode}
-                    measurePoints={measurePoints}
-                    renderWidthPx={page?.widthPx}
-                    renderHeightPx={page?.heightPx}
-                    graphicsKind={page?.graphicsKind}
-                    graphicsSummary={page?.graphicsSummary}
-                    ocrScaleText={effectiveOcrScaleText}
-                    ocrLines={page?.ocrMeta?.lines}
-                    scaleOcrBusy={ocrBusy && (ocrKind === "title_block" || ocrKind === "both")}
-                    scaleOcrStatus={
-                      ocrKind === "title_block" || ocrKind === "both" ? ocrStatus : null
-                    }
-                    scaleOcrProgress={
-                      ocrKind === "title_block" || ocrKind === "both" ? ocrProgress : null
-                    }
-                    scaleOcrNotice={titleBlockOcrNotice}
-                    scaleOcrError={titleBlockOcrError}
-                    titleBlockRegionSet={Boolean(titleBlockRegion)}
-                    autoScaleOcr={autoScaleOcr}
-                    onAutoScaleOcrChange={(checked) => {
-                      setAutoScaleOcr(checked);
-                      if (checked) {
-                        autoScaleOcrAttemptedRef.current.delete(
-                          `${analysisId}:${pageNumber}`,
-                        );
-                      }
-                    }}
-                    onApplyOcrScale={
-                      effectiveOcrScaleText && page
-                        ? () =>
-                            applyScaleFromOcrText(
-                              effectiveOcrScaleText,
-                              scaleInfo,
-                              page,
-                              handleApplyOcrScale,
-                            )
-                        : undefined
-                    }
-                    onRunTitleBlockOcr={() => void runTitleBlockOcr([pageNumber], true)}
-                    onCancelScaleOcr={cancelOcr}
-                    onStartCalibrate={() => {
-                      setOverlayTool("pan");
-                      setToolMode("calibrate");
-                      setMeasurePoints([]);
-                    }}
-                    onStartDeclaration={() => {
-                      setOverlayTool("pan");
-                      setToolMode("declaration");
-                      setMeasurePoints([]);
-                    }}
-                    onStartMeasure={() => {
-                      setOverlayTool("pan");
-                      setToolMode("measure");
-                      setMeasurePoints([]);
-                    }}
-                    onCancelTool={() => {
-                      setToolMode("none");
-                      setMeasurePoints([]);
-                    }}
-                    onClearPoints={() => setMeasurePoints([])}
-                    onApplyCalibration={handleApplyCalibration}
-                    onApplyDeclaration={handleApplyDeclaration}
-                  />
-                ) : (
-                  <p className="text-sm text-slate-500">No scale data available.</p>
-                )}
-              </>
             ) : inspectorTab === "hierarchy" ? (
               <HierarchyPanel
                 hierarchy={liveHierarchy}
                 activePageNumber={pageNumber}
                 selectedId={selectedIds[0] ?? null}
+                entities={overlayPages[pageKey(analysisId, pageNumber)]?.entities ?? []}
+                pixelsPerMeter={scaleInfo?.pixelsPerMeter ?? null}
                 onSelectFloorPage={(n) => {
                   const idx = result?.pages.findIndex((p) => p.pageNumber === n) ?? -1;
                   if (idx >= 0) setPageIndex(idx);
@@ -1925,152 +2209,125 @@ export function AnalysisPageClient({ projectId, analysisId }: AnalysisPageClient
                   }
                   selectOverlay([id]);
                 }}
+                onAddUnit={(pageNumber, raw) => {
+                  if (!result) return false;
+                  if (!parseManualUnitIds(raw).length) return false;
+                  const pages = result.pages.map((p) =>
+                    p.pageNumber === pageNumber ? addManualUnitIds(p, raw) : p,
+                  );
+                  void projectStore.setResult(analysisId, { ...result, pages });
+                  return true;
+                }}
+                onRemoveUnit={(pageNumber, label) => {
+                  if (!result) return;
+                  const pages = result.pages.map((p) =>
+                    p.pageNumber === pageNumber ? removeManualUnitId(p, label) : p,
+                  );
+                  void projectStore.setResult(analysisId, { ...result, pages });
+                }}
+              />
+            ) : inspectorTab === "policy" ? (
+              <PolicyPanel
+                projectId={projectId}
+                checks={result?.complianceResults ?? []}
+                apartmentCount={liveHierarchy?.units.length ?? 0}
+                onRunCheck={() => void runPolicyCheck()}
+                onCancelCheck={cancelPolicyCheck}
+                busy={policyBusy}
+                error={policyError}
+              />
+            ) : inspectorTab === "review" ? (
+              <ReviewPanel
+                projectId={projectId}
+                result={result}
+                hierarchy={liveHierarchy}
+                entities={overlayPages[pageKey(analysisId, pageNumber)]?.entities ?? []}
+                pixelsPerMeter={scaleInfo?.pixelsPerMeter ?? null}
+                levelName={page?.levelName}
+                ocrLines={[...(page?.ocrMeta?.lines ?? []), ...(page?.drawingOcrMeta?.lines ?? [])]}
+                selectedId={selectedIds[0] ?? null}
+                onSelect={(ids) => selectOverlay(ids)}
+                onPolicy={() => void runPolicyCheck()}
+                onCancelPolicy={cancelPolicyCheck}
+                policyBusy={policyBusy}
+                policyError={policyError}
               />
             ) : inspectorTab === "detect" ? (
-              <>
-                <div className="space-y-2">
-                  <DetectModelSelect
-                    value={detection.detectModelId}
-                    onChange={detection.selectDetectModel}
-                    disabled={detection.detecting}
-                    graphicsKind={page?.graphicsKind}
-                  />
-                  <label className="flex items-start gap-2 text-[11px] leading-snug text-slate-600">
-                    <input
-                      type="checkbox"
-                      className="mt-0.5"
-                      checked={detection.autoDetect}
-                      disabled={detection.detecting}
-                      onChange={(e) => detection.setAutoDetect(e.target.checked)}
-                    />
-                    <span>Auto-detect when opening a page (off by default)</span>
-                  </label>
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      className="flex-1 rounded bg-slate-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-800 disabled:opacity-50"
-                      disabled={detection.detecting}
-                      onClick={() => void detection.runDetect()}
-                    >
-                      {detection.detecting
-                        ? detection.progress?.label ?? "Detecting…"
-                        : "Detect regions"}
-                    </button>
-                    {detection.detecting ? (
-                      <button
-                        type="button"
-                        className="rounded border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
-                        onClick={() => detection.cancelDetect()}
-                      >
-                        Cancel
-                      </button>
-                    ) : null}
-                  </div>
-                  {detection.detecting && detection.progress && detection.progress.total > 0 ? (
-                    <div className="h-1.5 overflow-hidden rounded bg-slate-100">
-                      <div
-                        className="h-full bg-sky-600 transition-all"
-                        style={{
-                          width: `${Math.min(
-                            100,
-                            (100 * detection.progress.index) / Math.max(1, detection.progress.total),
-                          )}%`,
-                        }}
-                      />
-                    </div>
-                  ) : null}
-                  <p
-                    className={
-                      detection.detectError
-                        ? "text-[11px] leading-relaxed text-red-600"
-                        : "text-[11px] leading-relaxed text-slate-500"
-                    }
-                  >
-                    {detection.detectError
-                      ? detection.detectError
-                      : detection.detecting
-                        ? detection.progress?.label ?? "Running detection…"
-                        : detection.regionCount > 0
-                          ? `${detection.regionCount} regions · ${detection.modelLabel ?? "detector"} · select to keep or reject`
-                          : (detection.detectWarning ??
-                            "Pick a model, then Detect regions. Large pages run tile-by-tile.")}
-                  </p>
-                  <Link href="/studio" className="block text-[11px] text-brand-700 hover:underline">
-                    Annotate and fine-tune in Model Studio
-                  </Link>
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      className="flex-1 rounded border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-50 disabled:opacity-50"
-                      disabled={policyBusy || detection.detecting}
-                      onClick={() => void runPolicyCheck()}
-                    >
-                      {policyBusy ? "Running policy…" : "Run policy check"}
-                    </button>
-                    {policyBusy ? (
-                      <button
-                        type="button"
-                        className="rounded border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
-                        onClick={cancelPolicyCheck}
-                      >
-                        Cancel
-                      </button>
-                    ) : null}
-                  </div>
-                  {policyError ? (
-                    <p className="text-[11px] leading-relaxed text-red-600">{policyError}</p>
-                  ) : result?.complianceResults?.length ? (
-                    <p className="text-[11px] leading-relaxed text-slate-500">
-                      {result.complianceResults.length} policy result
-                      {result.complianceResults.length === 1 ? "" : "s"} ·{" "}
-                      <Link
-                        href={`/projects/${projectId}/analyses/${analysisId}/review`}
-                        className="text-brand-700 hover:underline"
-                      >
-                        Open review
-                      </Link>
-                    </p>
-                  ) : (
-                    <p className="text-[11px] leading-relaxed text-slate-500">
-                      After detect + scale, run policy check to evaluate design rules.
-                    </p>
-                  )}
-                </div>
-                <OverlayLayerPanel sourceFilter="model" />
-                <EntityInspector sourceFilter="model" />
-              </>
+              <DetectPanel
+                modelId={detection.detectModelId}
+                onChangeModel={detection.selectDetectModel}
+                detecting={detection.detecting}
+                detectTask={detection.detectTask}
+                autoDetect={detection.autoDetect}
+                onAutoDetectChange={detection.setAutoDetect}
+                onRun={() => void detection.runDetect()}
+                onRunModel={(id, cat) => void detection.runDetectModel(id, cat)}
+                onRunAll={() => void detection.runDetectAll()}
+                familyCounts={detection.familyCounts}
+                onCancel={() => detection.cancelDetect()}
+                progress={detection.progress}
+                detectError={detection.detectError}
+                detectWarning={detection.detectWarning}
+                regionCount={detection.regionCount}
+                modelLabel={detection.modelLabel}
+                onInferUnits={() => {
+                  if (!page) return;
+                  const r = applyUnitBoundariesFromPage({
+                    analysisId,
+                    pageNumber: page.pageNumber,
+                    widthPx: page.widthPx,
+                    heightPx: page.heightPx,
+                    drawingOcrMeta: page.drawingOcrMeta,
+                  });
+                  setUnitInferNotice(
+                    r.created || r.labeled
+                      ? `Inferred ${r.created} unit${r.created === 1 ? "" : "s"}${
+                          r.labeled ? ` · labelled ${r.labeled}` : ""
+                        }`
+                      : "Run Detect and drawing OCR first",
+                  );
+                }}
+                unitInferNotice={unitInferNotice}
+                inferDisabled={!page}
+                onPolicy={() => void runPolicyCheck()}
+                onCancelPolicy={cancelPolicyCheck}
+                policyBusy={policyBusy}
+                policyError={policyError}
+                policyCount={result?.complianceResults?.length ?? 0}
+                onOpenReview={() => {
+                  setInspectorTab("review");
+                  setOverlayTool("select");
+                }}
+              />
+            ) : inspectorTab === "geometry" ? (
+              <GeometryPanel
+                analysisId={analysisId}
+                pageNumber={pageNumber}
+                widthPx={page?.widthPx ?? 0}
+                heightPx={page?.heightPx ?? 0}
+                entities={overlayPages[pageKey(analysisId, pageNumber)]?.entities ?? []}
+                pixelsPerMeter={scaleInfo?.pixelsPerMeter ?? null}
+                pageImageUrl={pageImageUrl}
+                drawingOcrLines={pageSpaceDrawingOcrLines}
+                ocrLinesForTypes={ocrLinesFromPage(page)}
+              />
             ) : null}
         </VerticalInspectorTabs>
         </div>
       }
     >
-      <div className="flex h-full min-h-0 flex-col bg-white">
-        <OverlayHotkeys enabled={toolMode === "none"} layoutEditMode={inspectorTab === "layout"} />
-        <EditorToolbar
-          pageCount={pageCount}
-          onRotateCw={() => void handleRotatePage(90)}
-          onRotateCcw={() => void handleRotatePage(270)}
-          onRotateAllCw={() => void handleRotateAllPages(90)}
-          onRotateAllCcw={() => void handleRotateAllPages(270)}
-          rotating={rotating}
-          rotateStatus={rotateStatus}
+      <div className="flex h-full min-h-0 flex-col bg-[var(--hl-panel)]">
+        <OverlayHotkeys
+          enabled={toolMode === "none"}
+          layoutEditMode={inspectorTab === "layout"}
+          keepSelectOnEscape={inspectorTab === "detect" || inspectorTab === "geometry"}
+          compassKeypoints={inspectorTab === "detect"}
         />
         {rotateError ? (
-          <p className="border-b border-red-100 bg-red-50 px-3 py-1 text-[11px] text-red-700">
+          <p className="border-b border-red-100 bg-red-50 px-3 py-1 text-[13px] text-red-700">
             {rotateError}
           </p>
         ) : null}
-
-        {hasLegacyReview && (
-          <div className="shrink-0 border-b border-slate-200 px-3 py-2">
-            <Link
-              href={`/projects/${projectId}/analyses/${analysisId}/review`}
-              className="text-xs text-brand-600 hover:underline"
-            >
-              Open legacy review viewer →
-            </Link>
-          </div>
-        )}
 
         {pageImageError ? (
           <div className="flex flex-1 flex-col items-center justify-center gap-2 p-6 text-center text-sm text-slate-600">
@@ -2098,8 +2355,11 @@ export function AnalysisPageClient({ projectId, analysisId }: AnalysisPageClient
             ocrRegion={ocrOverlay?.pageNumber === pageNumber ? ocrOverlay.region : null}
             activeOcrTile={ocrOverlay?.pageNumber === pageNumber ? ocrOverlay.tile : null}
             ocrHighlights={ocrHighlights}
+            ocrRoomMarkers={ocrRoomMarkers}
+            unitGraphOverlay={unitGraphOverlay}
             showOcrToggle={true}
             layoutEditMode={inspectorTab === "layout" && toolMode === "none"}
+            pixelsPerMeter={scaleInfo?.pixelsPerMeter ?? null}
             detectProgressLabel={
               detection.detecting ? detection.progress?.label ?? "Detecting…" : null
             }

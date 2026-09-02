@@ -206,3 +206,45 @@ def test_page_split_filters_training(tmp_path: Path, monkeypatch: pytest.MonkeyP
     out = store.labeled_pages_dir(dataset["id"], split="train")
     assert out.is_dir()
 
+
+def test_update_dataset_purpose_swaps_task_and_stock_classes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HIGHLIFE_STUDIO_DIR", str(tmp_path))
+    dataset = store.create_dataset(
+        name="walls",
+        task="segment",
+        class_names=["Wall", "External Wall"],
+        category="wall_segmentation",
+    )
+    next_ds = store.update_dataset_purpose(dataset["id"], "north_arrow")
+    assert next_ds["category"] == "north_arrow"
+    assert next_ds["task"] == "pose"
+    assert next_ds["class_names"] == ["North Arrow"]
+
+    custom = store.create_dataset(
+        name="custom",
+        task="segment",
+        class_names=["Custom Wall"],
+        category="wall_segmentation",
+    )
+    merged = store.update_dataset_purpose(custom["id"], "north_arrow")
+    assert merged["class_names"][0] == "North Arrow"
+    assert "Custom Wall" in merged["class_names"]
+
+    leftover = store.create_dataset(
+        name="layout leftover",
+        task="detect",
+        class_names=[
+            "Title block",
+            "Drawing area",
+            "Legend block",
+            "Drawing border",
+            "Revision block",
+            "North",
+        ],
+        category="layout_analysis",
+    )
+    cleaned = store.update_dataset_purpose(leftover["id"], "north_arrow")
+    assert cleaned["class_names"] == ["North Arrow"]
+

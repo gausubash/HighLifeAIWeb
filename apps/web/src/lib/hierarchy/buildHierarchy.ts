@@ -9,6 +9,12 @@ import type {
 } from "@highlife/shared-types";
 import { COMMON_AREA_LABELS } from "@highlife/shared-types";
 import type { OverlayEntity, OverlayGeometry } from "@/features/plan-editor/types";
+import {
+  roomsToOverlayEntities,
+  type ExtractedGeometryRoom,
+} from "@/lib/geometry/wallBoundedRooms";
+import { apartmentUnitKey } from "@/lib/hierarchy/apartmentType";
+import { areaM2FromPx, polygonAreaPx2 } from "./apartmentCharacteristics";
 
 type Pt = { x: number; y: number };
 
@@ -117,7 +123,7 @@ function bathroomish(t: string): boolean {
 }
 
 function normalizeUnitKey(label: string): string {
-  return label.trim().toLowerCase().replace(/^unit\s+/, "").replace(/\s+/g, "");
+  return apartmentUnitKey(label);
 }
 
 function ocrUnitLabel(raw: string): string {
@@ -130,14 +136,13 @@ function ocrUnitLabel(raw: string): string {
 /** Numeric then letter suffix, so Unit 2 < Unit 10 < Unit 10A. */
 export function compareUnitLabels(a: string, b: string): number {
   const key = (label: string) => {
-    const raw = label.trim();
-    const stripped = raw.replace(/^unit[\s#:-]*/i, "").trim();
-    const match = stripped.match(/(\d+)/);
+    const id = apartmentUnitKey(label);
+    const match = id.match(/(\d+)/);
     const n = match ? parseInt(match[1], 10) : Number.POSITIVE_INFINITY;
     const suffix = match
-      ? stripped.slice(stripped.indexOf(match[1]) + match[1].length).replace(/^[\s._-]*/, "")
-      : stripped;
-    return { n, suffix: suffix.toLowerCase(), raw: raw.toLowerCase() };
+      ? id.slice(id.indexOf(match[1]) + match[1].length).replace(/^[\s._-]*/, "")
+      : id;
+    return { n, suffix: suffix.toLowerCase(), raw: id.toLowerCase() };
   };
   const ka = key(a);
   const kb = key(b);
@@ -172,6 +177,42 @@ function hierarchyUnitsFromOcr(pageId: string, ocrUnitIds: string[]): HierarchyU
     });
   }
   return units;
+}
+
+function attrString(entity: OverlayEntity, key: string): string | null {
+  const value = entity.attributes?.[key];
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function attrNumber(entity: OverlayEntity, key: string): number | null {
+  const value = entity.attributes?.[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function findUnitByLabel(
+  units: Array<{ id: string; label: string }>,
+  label: string | null,
+): string | null {
+  if (!label) return null;
+  const key = normalizeUnitKey(label);
+  if (!key) return null;
+  return units.find((u) => normalizeUnitKey(u.label) === key)?.id ?? null;
+}
+
+function refreshUnitRoomStats(
+  pageUnits: HierarchyUnit[],
+  pageRooms: HierarchyRoom[],
+): HierarchyUnit[] {
+  return pageUnits.map((unit) => {
+    const roomIds = pageRooms.filter((r) => r.unitId === unit.id && !r.isCommon).map((r) => r.id);
+    const uRooms = pageRooms.filter((r) => roomIds.includes(r.id));
+    return {
+      ...unit,
+      roomIds,
+      bedroomCount: uRooms.filter((r) => bedroomish(r.roomType)).length,
+      bathroomCount: uRooms.filter((r) => bathroomish(r.roomType)).length,
+    };
+  });
 }
 
 function mergeOcrTextUnits(
@@ -227,8 +268,12 @@ export function buildHierarchyFromOverlays(args: {
   pages: FloorPageMeta[];
   /** Entities keyed by pageNumber */
   entitiesByPage: Record<number, OverlayEntity[]>;
+  /** Wall-bounded rooms from Geometry / Graph, keyed by pageNumber. */
+  geometryRoomsByPage?: Record<number, ExtractedGeometryRoom[]>;
+  pixelsPerMeter?: number | null;
 }): BuildingHierarchy {
   const now = new Date().toISOString();
+  const ppm = args.pixelsPerMeter ?? null;
   const rooms: HierarchyRoom[] = [];
   const units: HierarchyUnit[] = [];
   const objects: HierarchyObject[] = [];
@@ -240,7 +285,12 @@ export function buildHierarchyFromOverlays(args: {
     const entities = (args.entitiesByPage[page.pageNumber] ?? []).filter(
       (e) => e.status !== "rejected",
     );
-    const roomEntities = entities.filter((e) => e.type === "room");
+    const geometryRooms = (args.geometryRoomsByPage?.[page.pageNumber] ?? []).filter(
+      (room) => room.points.length >= 3,
+    );
+    const roomEntities = geometryRooms.length
+      ? roomsToOverlayEntities(geometryRooms)
+      : entities.filter((e) => e.type === "room");
     const unitEntities = entities.filter((e) => e.type === "unit_boundary");
     const objectEntities = entities.filter((e) =>
       ["door", "window", "fixture", "stair"].includes(e.type),
@@ -255,35 +305,53 @@ export function buildHierarchyFromOverlays(args: {
     }));
 
     const pageRooms: HierarchyRoom[] = [];
+    const roomUnitLabels = new Map<string, string>();
     for (const r of roomEntities) {
       const pts = pointsOf(r.geometry);
       const c = centroid(pts);
       const rb = bbox(pts);
-      const common = isCommonLabel(r.label);
+      const common = Boolean(r.attributes?.isCommon) || isCommonLabel(r.label);
+      const attrUnitId = attrString(r, "unitId");
+      const attrUnitLabel = attrString(r, "unitLabel");
+      if (attrUnitLabel) roomUnitLabels.set(r.id, attrUnitLabel);
       let unitId: string | null = null;
-      if (!common && c) {
-        let best: { id: string; score: number } | null = null;
-        for (const u of unitPolys) {
-          if (u.pts.length >= 3 && pointInPoly(c.x, c.y, u.pts)) {
-            best = { id: u.id, score: 1 };
-            break;
-          }
-          if (rb && u.box) {
-            const frac = overlapFrac(rb, u.box);
-            if (frac >= 0.5 && (!best || frac > best.score)) {
-              best = { id: u.id, score: frac };
+      if (!common) {
+        if (attrUnitId && unitPolys.some((u) => u.id === attrUnitId)) {
+          unitId = attrUnitId;
+        } else {
+          unitId = findUnitByLabel(unitPolys, attrUnitLabel);
+        }
+        if (!unitId && c) {
+          let best: { id: string; score: number } | null = null;
+          for (const u of unitPolys) {
+            if (u.pts.length >= 3 && pointInPoly(c.x, c.y, u.pts)) {
+              best = { id: u.id, score: 1 };
+              break;
+            }
+            if (rb && u.box) {
+              const frac = overlapFrac(rb, u.box);
+              if (frac >= 0.5 && (!best || frac > best.score)) {
+                best = { id: u.id, score: frac };
+              }
             }
           }
+          unitId = best?.id ?? null;
         }
-        unitId = best?.id ?? null;
       }
+      const labeledWidthM = attrNumber(r, "labeledWidthM");
+      const labeledDepthM = attrNumber(r, "labeledDepthM");
+      const labeledArea =
+        labeledWidthM != null && labeledDepthM != null ? labeledWidthM * labeledDepthM : null;
       const room: HierarchyRoom = {
         id: r.id,
         label: r.label || "Room",
         roomType: r.label || "room",
         unitId,
         isCommon: common,
-        areaM2: null,
+        areaM2: labeledArea ?? areaM2FromPx(polygonAreaPx2(pts), ppm),
+        labeledWidthM,
+        labeledDepthM,
+        labeledSizeText: attrString(r, "labeledSizeText"),
         confidence: r.confidence,
         objectIds: [],
       };
@@ -335,7 +403,7 @@ export function buildHierarchyFromOverlays(args: {
         pageUnits.push({
           id: u.id,
           label: u.label,
-          areaM2: null,
+          areaM2: areaM2FromPx(polygonAreaPx2(u.pts), ppm),
           roomIds,
           bedroomCount: uRooms.filter((r) => bedroomish(r.roomType)).length,
           bathroomCount: uRooms.filter((r) => bathroomish(r.roomType)).length,
@@ -347,10 +415,12 @@ export function buildHierarchyFromOverlays(args: {
       const privateRooms = pageRooms.filter((r) => !r.isCommon);
       const id = `unit-fallback-${page.pageId}`;
       for (const r of privateRooms) r.unitId = id;
+      const fallbackArea =
+        privateRooms.reduce((sum, r) => sum + (r.areaM2 ?? 0), 0) || null;
       pageUnits.push({
         id,
         label: "Unit 1",
-        areaM2: null,
+        areaM2: ppm && fallbackArea ? fallbackArea : null,
         roomIds: privateRooms.map((r) => r.id),
         bedroomCount: privateRooms.filter((r) => bedroomish(r.roomType)).length,
         bathroomCount: privateRooms.filter((r) => bathroomish(r.roomType)).length,
@@ -368,6 +438,15 @@ export function buildHierarchyFromOverlays(args: {
         }
       }
     }
+    for (const room of pageRooms) {
+      if (room.isCommon) continue;
+      if (room.unitId && pageUnits.some((u) => u.id === room.unitId) && !room.unitId.startsWith("unit-fallback-")) {
+        continue;
+      }
+      const labeled = findUnitByLabel(pageUnits, roomUnitLabels.get(room.id) ?? null);
+      if (labeled) room.unitId = labeled;
+    }
+    pageUnits = refreshUnitRoomStats(pageUnits, pageRooms);
     units.push(...pageUnits);
 
     const commonAreaIds = pageRooms.filter((r) => r.isCommon).map((r) => r.id);

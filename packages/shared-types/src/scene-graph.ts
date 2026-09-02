@@ -118,7 +118,8 @@ export interface Measurement {
     | "opening_width"
     | "wall_thickness"
     | "min_room_width"
-    | "distance";
+    | "distance"
+    | "window_long_edge";
   sourceGeometryIds: string[];
   calibrationId: string;
   valuePx?: number;

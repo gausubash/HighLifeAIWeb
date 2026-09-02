@@ -1,12 +1,15 @@
-export type StudioTask = "detect" | "segment";
+export type StudioTask = "detect" | "segment" | "pose";
 
 export type StudioModelCategory =
   | "layout_analysis"
+  | "wall_segmentation"
+  | "room_types"
+  | "object_detection"
   | "wall_detection"
   | "room_detection"
-  | "wall_segmentation"
   | "general_detection"
-  | "general_segmentation";
+  | "general_segmentation"
+  | "north_arrow";
 
 export type StudioPage = {
   id: string;
@@ -63,6 +66,9 @@ export type MlTrainingJob = {
   metrics_history?: Record<string, unknown>[];
   preview_epoch?: number | null;
   preview_updated_at?: string | null;
+  preview_epochs?: number[];
+  has_gt_preview?: boolean;
+  plots?: { id: string; label: string }[];
   log_tail: string | null;
   error: string | null;
   output_model_id: string | null;

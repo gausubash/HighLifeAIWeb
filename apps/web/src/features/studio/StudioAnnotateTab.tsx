@@ -6,9 +6,17 @@ import { AnnotationPanel } from "@/features/plan-editor/AnnotationPanel";
 import { EditorToolbar } from "@/features/plan-editor/EditorToolbar";
 import { OverlayHotkeys } from "@/features/plan-editor/OverlayHotkeys";
 import { overlaysToLabelMe, parseLabelMeJson } from "@/features/plan-editor/labelme";
+import {
+  applyLabeledPage,
+  buildPageLabelDoc,
+  labelShapesFingerprint,
+  pageSaveKey,
+  type AnnotateSaveStatus,
+} from "@/features/studio/studioLabelSave";
 import { extraClassesFromDataset, mergeAnnotateClasses } from "@/features/plan-editor/labelClasses";
 import { pageKey, useOverlayStore } from "@/features/plan-editor/useOverlayStore";
 import { PdfPageViewer } from "@/features/plan-viewer/PdfPageViewer";
+import { useLayoutStore } from "@/features/plan-viewer/useLayoutStore";
 import { useViewerStore } from "@/features/plan-viewer/useViewerStore";
 import {
   addDatasetClass,
@@ -22,7 +30,7 @@ import {
 import type { MlDataset, StudioPage } from "@/lib/studio/types";
 
 interface StudioAnnotateTabProps {
-  sidebar?: ReactNode;
+  activityRail?: ReactNode;
   initialDatasetId?: string;
   onOpenTrain?: (datasetId: string) => void;
   onManageDatasets?: (datasetId?: string) => void;
@@ -36,7 +44,7 @@ function isFullPage(page: StudioPage): boolean {
 }
 
 export function StudioAnnotateTab({
-  sidebar,
+  activityRail,
   initialDatasetId,
   onOpenTrain,
   onManageDatasets,
@@ -54,8 +62,13 @@ export function StudioAnnotateTab({
   const [loadError, setLoadError] = useState<string | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
   const [addClassError, setAddClassError] = useState<string | null>(null);
+  const [saveStatus, setSaveStatus] = useState<AnnotateSaveStatus>("idle");
+  const [saveError, setSaveError] = useState<string | null>(null);
   const suppressSaveRef = useRef(false);
-  const lastSavedRef = useRef<string>("");
+  const lastSavedRef = useRef<Record<string, string>>({});
+  const inflightRef = useRef<Map<string, Promise<void>>>(new Map());
+  const saveStatusRef = useRef<AnnotateSaveStatus>("idle");
+  saveStatusRef.current = saveStatus;
 
   const pages = useMemo(
     () => (dataset?.pages ?? []).filter(isFullPage),
@@ -104,6 +117,75 @@ export function StudioAnnotateTab({
     [datasetId],
   );
 
+  const persistFor = useCallback(
+    async (
+      dsId: string,
+      target: StudioPage,
+      pn: number,
+      options?: { keepalive?: boolean },
+    ) => {
+      const key = pageSaveKey(dsId, target.id);
+      const run = async () => {
+        // Do not write until this page has been hydrated from disk (avoids wiping JSON
+        // on React Strict Mode remount or while labels are still loading).
+        if (lastSavedRef.current[key] === undefined) return;
+        const entities = useOverlayStore.getState().pages[pageKey(dsId, pn)]?.entities ?? [];
+        const doc = buildPageLabelDoc(entities, target);
+        const fingerprint = labelShapesFingerprint(doc.shapes);
+        if (fingerprint === lastSavedRef.current[key]) {
+          setSaveStatus((current) => (current === "unsaved" || current === "saving" ? "saved" : current));
+          return;
+        }
+        setSaveStatus("saving");
+        setSaveError(null);
+        try {
+          const updated = await saveDatasetPageLabels(dsId, target.id, doc, {
+            keepalive: options?.keepalive === true,
+          });
+          lastSavedRef.current[key] = fingerprint;
+          setSaveStatus("saved");
+          setDataset((current) => (current ? applyLabeledPage(current, updated) : current));
+        } catch (e) {
+          setSaveStatus("error");
+          setSaveError(e instanceof Error ? e.message : "Could not save labels.");
+        }
+      };
+      const prev = inflightRef.current.get(key) ?? Promise.resolve();
+      const next = prev.then(run, run);
+      inflightRef.current.set(key, next);
+      try {
+        await next;
+      } finally {
+        if (inflightRef.current.get(key) === next) inflightRef.current.delete(key);
+      }
+    },
+    [],
+  );
+
+  const persistPageLabels = useCallback(
+    async (options?: { keepalive?: boolean }) => {
+      if (!datasetId || !page) return;
+      await persistFor(datasetId, page, overlayPageNumber, options);
+    },
+    [datasetId, overlayPageNumber, page, persistFor],
+  );
+
+  const goToPage = useCallback(
+    async (index: number) => {
+      await persistPageLabels();
+      setPageIndex(index);
+    },
+    [persistPageLabels, setPageIndex],
+  );
+
+  const changeDataset = useCallback(
+    async (id: string) => {
+      await persistPageLabels();
+      setDatasetId(id);
+    },
+    [persistPageLabels],
+  );
+
   useEffect(() => {
     let cancelled = false;
     void (async () => {
@@ -138,11 +220,18 @@ export function StudioAnnotateTab({
     };
   }, [datasetId]);
 
+  const isNorthCompass = dataset?.category === "north_arrow";
+
+  useEffect(() => {
+    useLayoutStore.getState().setInspectorOpen(true);
+  }, []);
+
   useEffect(() => {
     setPageIndex(0);
-    setOverlayTool("polygon");
+    setOverlayTool(isNorthCompass ? "rect" : "polygon");
+    if (isNorthCompass) useOverlayStore.getState().setLabelClass("North Arrow");
     resetView();
-  }, [datasetId, resetView, setOverlayTool, setPageIndex]);
+  }, [datasetId, isNorthCompass, resetView, setOverlayTool, setPageIndex]);
 
   useEffect(() => {
     if (pages.length > 0 && pageIndex >= pages.length) setPageIndex(pages.length - 1);
@@ -157,7 +246,11 @@ export function StudioAnnotateTab({
     if (!datasetId || !page) return;
     let cancelled = false;
     const pageId = page.id;
+    const key = pageSaveKey(datasetId, pageId);
     void (async () => {
+      const pending = inflightRef.current.get(key);
+      if (pending) await pending;
+      if (cancelled) return;
       const raw = await fetchPageLabels(datasetId, pageId);
       if (cancelled) return;
       // Mark as hydrate so autosave does not immediately PUT the same labels.
@@ -167,7 +260,8 @@ export function StudioAnnotateTab({
           analysisId: datasetId,
           pageNumber: overlayPageNumber,
         });
-        lastSavedRef.current = "[]";
+        lastSavedRef.current[key] = "[]";
+        setSaveStatus("saved");
         return;
       }
       const parsed = parseLabelMeJson(raw);
@@ -175,13 +269,8 @@ export function StudioAnnotateTab({
         analysisId: datasetId,
         pageNumber: overlayPageNumber,
       });
-      lastSavedRef.current = JSON.stringify(
-        overlaysToLabelMe(parsed.entities, {
-          imagePath: `${pageId}.png`,
-          imageWidth: page.width_px,
-          imageHeight: page.height_px,
-        }).shapes,
-      );
+      lastSavedRef.current[key] = labelShapesFingerprint(buildPageLabelDoc(parsed.entities, page).shapes);
+      setSaveStatus("saved");
     })().catch(() => undefined);
     return () => {
       cancelled = true;
@@ -194,9 +283,9 @@ export function StudioAnnotateTab({
     if (!datasetId || !page) return;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const key = pageKey(datasetId, overlayPageNumber);
-    const pageId = page.id;
-    const widthPx = page.width_px;
-    const heightPx = page.height_px;
+    const target = page;
+    const dsId = datasetId;
+    const pn = overlayPageNumber;
 
     const unsub = useOverlayStore.subscribe((state, prev) => {
       // Ignore selection / draft / history noise — only entity list changes matter.
@@ -209,44 +298,48 @@ export function StudioAnnotateTab({
       const nextEntities = state.pages[key]?.entities ?? [];
       if (prevEntities === undefined && nextEntities.length === 0) return;
 
+      setSaveStatus("unsaved");
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => {
-        const entities = useOverlayStore.getState().pages[key]?.entities ?? [];
-        const doc = overlaysToLabelMe(entities, {
-          imagePath: `${pageId}.png`,
-          imageWidth: widthPx,
-          imageHeight: heightPx,
-        });
-        const fingerprint = JSON.stringify(doc.shapes);
-        if (fingerprint === lastSavedRef.current) return;
-        lastSavedRef.current = fingerprint;
-        void saveDatasetPageLabels(datasetId, pageId, doc).then((updated) => {
-          setDataset((current) => {
-            if (!current) return current;
-            const pages = current.pages.map((item) =>
-              item.id === updated.id
-                ? {
-                    ...item,
-                    labeled: updated.labeled,
-                    shape_count: updated.shape_count,
-                    labels_path: updated.labels_path,
-                  }
-                : item,
-            );
-            return {
-              ...current,
-              pages,
-              labeled_count: pages.filter((item) => item.labeled).length,
-            };
-          });
-        });
-      }, 700);
+        void persistFor(dsId, target, pn);
+      }, 400);
     });
+
+    const flush = () => {
+      if (timer) {
+        clearTimeout(timer);
+        timer = undefined;
+      }
+      void persistFor(dsId, target, pn, { keepalive: true });
+    };
+
+    const onVis = () => {
+      if (document.visibilityState === "hidden") flush();
+    };
+    const onUnload = (e: BeforeUnloadEvent) => {
+      if (
+        saveStatusRef.current === "unsaved" ||
+        saveStatusRef.current === "saving" ||
+        saveStatusRef.current === "error"
+      ) {
+        e.preventDefault();
+        e.returnValue = "";
+        flush();
+      }
+    };
+    document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("beforeunload", onUnload);
+
     return () => {
       unsub();
+      document.removeEventListener("visibilitychange", onVis);
+      window.removeEventListener("beforeunload", onUnload);
       if (timer) clearTimeout(timer);
+      void persistFor(dsId, target, pn, { keepalive: true });
     };
-  }, [datasetId, overlayPageNumber, page?.id, page?.width_px, page?.height_px]);
+    // page identity changes after each successful save; key off id + size only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [datasetId, overlayPageNumber, page?.id, page?.width_px, page?.height_px, persistFor]);
 
   const handleImportLabelMe = useCallback(
     async (file: File) => {
@@ -267,24 +360,10 @@ export function StudioAnnotateTab({
           imageHeight: page.height_px,
         });
         const updated = await saveDatasetPageLabels(datasetId, page.id, doc);
-        lastSavedRef.current = JSON.stringify(doc.shapes);
-        setDataset((current) =>
-          current
-            ? {
-                ...current,
-                pages: current.pages.map((item) =>
-                  item.id === updated.id
-                    ? {
-                        ...item,
-                        labeled: updated.labeled,
-                        shape_count: updated.shape_count,
-                        labels_path: updated.labels_path,
-                      }
-                    : item,
-                ),
-              }
-            : current,
-        );
+        lastSavedRef.current[pageSaveKey(datasetId, page.id)] = labelShapesFingerprint(doc.shapes);
+        setSaveStatus("saved");
+        setSaveError(null);
+        setDataset((current) => (current ? applyLabeledPage(current, updated) : current));
       } catch (e) {
         setImportError(e instanceof Error ? e.message : "Could not import LabelMe JSON.");
       }
@@ -317,16 +396,15 @@ export function StudioAnnotateTab({
 
   return (
     <WorkspaceShell
-      showSidebar
       hideTopBar
       allowNewProjectShortcut={false}
-      sidebar={sidebar}
+      activityRail={activityRail}
       leftPanelTitle="Pages"
       leftPanel={
         <div className="space-y-1.5">
           <button
             type="button"
-            className="w-full text-left text-[10px] text-brand-700 hover:underline"
+            className="w-full text-left text-xs text-brand-700 hover:underline"
             onClick={() => onManageDatasets?.(datasetId || undefined)}
           >
             Datasets →
@@ -334,14 +412,14 @@ export function StudioAnnotateTab({
           {datasetId ? (
             <button
               type="button"
-              className="w-full text-left text-[10px] text-brand-700 hover:underline"
+              className="w-full text-left text-xs text-brand-700 hover:underline"
               onClick={() => onOpenTiles?.(datasetId)}
             >
               Tiles →
             </button>
           ) : null}
           {pages.length === 0 ? (
-            <p className="px-0.5 text-[10px] leading-relaxed text-slate-500">
+            <p className="px-0.5 text-xs leading-relaxed text-slate-500">
               No pages yet. Upload in Datasets.
             </p>
           ) : (
@@ -363,7 +441,7 @@ export function StudioAnnotateTab({
                   <li key={item.id}>
                     <button
                       type="button"
-                      onClick={() => setPageIndex(index)}
+                      onClick={() => void goToPage(index)}
                       title={`${item.source_name} · ${meta}`}
                       className={
                         active
@@ -383,8 +461,8 @@ export function StudioAnnotateTab({
                       <span
                         className={
                           active
-                            ? "absolute inset-x-0 bottom-0 bg-brand-800/85 px-1 py-0 text-center text-[9px] font-medium text-white"
-                            : "absolute inset-x-0 bottom-0 bg-black/65 px-1 py-0 text-center text-[9px] font-medium text-white"
+                            ? "absolute inset-x-0 bottom-0 bg-brand-800/85 px-1 py-0 text-center text-xs font-medium text-white"
+                            : "absolute inset-x-0 bottom-0 bg-black/65 px-1 py-0 text-center text-xs font-medium text-white"
                         }
                       >
                         {item.page_number}
@@ -399,40 +477,40 @@ export function StudioAnnotateTab({
         </div>
       }
       inspectorTitle="Labels"
+      inspectorHint="Legend, new classes, import/export JSON, and shape inspector. Select a shape to edit its class or drag vertices on the canvas."
+      leftPanelHint="Upload pages in Datasets, then pick a sheet here to label."
       inspector={
-        <div className="space-y-4">
-          <p className="text-[11px] leading-relaxed text-slate-500">
-            Draw on the page, or import/export LabelMe JSON. Pick pages from the left panel.
-          </p>
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-3 py-3">
           {page ? (
-            <AnnotationPanel
-              includeLayoutClasses
-              extraClasses={extraClasses}
-              onAddClass={datasetId ? handleAddClass : undefined}
-              addClassError={addClassError}
-              onImportFile={(file) => void handleImportLabelMe(file)}
-              onExport={handleExportLabelMe}
-              importError={importError}
-            />
+            <>
+              <AnnotationPanel
+                includeLayoutClasses={!isNorthCompass}
+                compassAnnotate={isNorthCompass}
+                extraClasses={extraClasses}
+                onAddClass={datasetId ? handleAddClass : undefined}
+                addClassError={addClassError}
+                onImportFile={(file) => void handleImportLabelMe(file)}
+                onExport={handleExportLabelMe}
+                onSave={() => void persistPageLabels()}
+                saveStatus={saveStatus}
+                saveError={saveError}
+                importError={importError}
+              />
+            </>
           ) : (
-            <p className="text-[11px] text-slate-500">Select a page to edit labels.</p>
+            <p className="text-[13px] text-slate-500">Select a page to edit labels.</p>
           )}
         </div>
       }
-      statusText={
-        dataset
-          ? `${dataset.name} · ${pages.length} pages · ${dataset.labeled_count} labelled`
-          : "Draw labels on linked pages"
-      }
     >
-      <div className="flex h-full min-h-0 flex-col bg-white">
+      <div className="flex h-full min-h-0 max-h-full flex-col overflow-hidden bg-white">
         <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 px-3 py-2 text-xs">
           <label className="flex items-center gap-1.5 text-slate-600">
             Dataset
             <select
               className="max-w-[14rem] rounded border border-slate-300 bg-white px-1.5 py-1 text-xs text-slate-800"
               value={datasetId}
-              onChange={(e) => setDatasetId(e.target.value)}
+              onChange={(e) => void changeDataset(e.target.value)}
             >
               {datasets.length === 0 ? <option value="">No datasets</option> : null}
               {datasets.map((item) => (
@@ -447,6 +525,28 @@ export function StudioAnnotateTab({
               {page.source_name} · p{page.page_number}
               {(page.split || "train") === "test" ? " · test" : " · train"}
             </span>
+          ) : null}
+          {page ? (
+            <button
+              type="button"
+              className={
+                saveStatus === "error"
+                  ? "rounded border border-red-200 bg-red-50 px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-100 disabled:opacity-50"
+                  : saveStatus === "unsaved"
+                    ? "rounded border border-amber-300 bg-amber-50 px-2 py-1 text-xs font-medium text-amber-800 hover:bg-amber-100 disabled:opacity-50"
+                    : "rounded border border-slate-300 px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              }
+              disabled={saveStatus === "saving" || saveStatus === "idle"}
+              onClick={() => void persistPageLabels()}
+            >
+              {saveStatus === "saving"
+                ? "Saving…"
+                : saveStatus === "saved"
+                  ? "Saved"
+                  : saveStatus === "error"
+                    ? "Retry save"
+                    : "Save"}
+            </button>
           ) : null}
           {dataset && dataset.labeled_count > 0 ? (
             <>
@@ -470,18 +570,34 @@ export function StudioAnnotateTab({
             </>
           ) : null}
         </div>
+        {page && pageImageUrl ? (
+          <div className="border-b border-slate-200 bg-white px-2 py-1">
+            <EditorToolbar
+              showDrawTools
+              compassKeypoints={isNorthCompass}
+              classOptions={annotateClassOptions}
+            />
+          </div>
+        ) : null}
         {loadError ? (
           <p className="border-b border-red-100 bg-red-50 px-3 py-2 text-xs text-red-700">{loadError}</p>
         ) : null}
         {importError ? (
-          <p className="border-b border-red-100 bg-red-50 px-3 py-1 text-[11px] text-red-700">
+          <p className="border-b border-red-100 bg-red-50 px-3 py-1 text-[13px] text-red-700">
             {importError}
           </p>
         ) : null}
+        {saveError ? (
+          <p className="border-b border-red-100 bg-red-50 px-3 py-1 text-[13px] text-red-700">{saveError}</p>
+        ) : null}
         {page && pageImageUrl && page.width_px > 0 && page.height_px > 0 ? (
-          <>
-            <OverlayHotkeys enabled allowDraw />
-            <EditorToolbar showDrawTools classOptions={annotateClassOptions} />
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+            <OverlayHotkeys
+              enabled
+              allowDraw
+              compassKeypoints={isNorthCompass}
+              onSave={() => void persistPageLabels()}
+            />
             <PdfPageViewer
               key={`${page.id}-${page.width_px}x${page.height_px}`}
               imagePath={pageImageUrl}
@@ -491,7 +607,7 @@ export function StudioAnnotateTab({
               overlayMode="annotate"
               showLoupeToggle
             />
-          </>
+          </div>
         ) : page && pageImageUrl ? (
           <LinkedPageLoader
             datasetId={datasetId}

@@ -139,7 +139,7 @@ export function ResultsTable({ result, onSelectEntity, selectedId }: ResultsTabl
             ))}
           </p>
         ) : null}
-        <p className="mt-2 text-[11px] text-slate-400">
+        <p className="mt-2 text-[13px] text-slate-400">
           Policy {result.policyVersion}
           {result.modelVersions?.policy ? ` · pack ${result.modelVersions.policy}` : ""}
           {result.modelVersions?.detect ? ` · detect ${result.modelVersions.detect}` : ""}

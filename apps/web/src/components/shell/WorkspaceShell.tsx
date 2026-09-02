@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import {
@@ -15,38 +15,164 @@ import { AppTopBar } from "./AppTopBar";
 import { Panel } from "./Panel";
 import { PanelResizeHandle } from "./PanelResizeHandle";
 import { ProjectSidebar } from "./ProjectSidebar";
+import { VerticalInspectorTabs } from "./VerticalInspectorTabs";
+
+const ACTIVITY_BAR_WIDTH = 44;
+const PROJECT_TAB = { id: "project", label: "Project", title: "Projects and drawings" };
+const PAGE_TAB_ID = "page";
+
+function PropertiesPanel({ onClose }: { onClose?: () => void }) {
+  return (
+    <Panel
+      title="Properties"
+      bodyClassName="overflow-y-auto p-3"
+      action={onClose ? <PanelCloseButton onClick={onClose} title="Hide properties panel" /> : undefined}
+    >
+      <p className="text-xs leading-relaxed text-slate-500">
+        Select an item on the drawing to inspect its properties.
+      </p>
+    </Panel>
+  );
+}
+
+function PanelCloseButton({ onClick, title }: { onClick: () => void; title: string }) {
+  return (
+    <button
+      type="button"
+      className="rounded p-1 text-slate-500 hover:bg-[var(--hl-raised)] hover:text-slate-800"
+      onClick={onClick}
+      title={title}
+      aria-label={title}
+    >
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+        <path
+          d="M9 6l6 6-6 6"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    </button>
+  );
+}
+
+function FloatingMainChrome({
+  toolbar,
+  pinned,
+}: {
+  toolbar?: ReactNode;
+  pinned: boolean;
+}) {
+  const [hovered, setHovered] = useState(false);
+  const [focused, setFocused] = useState(false);
+  const hideTimer = useRef<number | null>(null);
+
+  const clearHide = () => {
+    if (hideTimer.current != null) {
+      window.clearTimeout(hideTimer.current);
+      hideTimer.current = null;
+    }
+  };
+
+  const enter = () => {
+    clearHide();
+    setHovered(true);
+  };
+
+  const leave = () => {
+    clearHide();
+    hideTimer.current = window.setTimeout(() => {
+      setHovered(false);
+      hideTimer.current = null;
+    }, 180);
+  };
+
+  useEffect(() => () => clearHide(), []);
+
+  const userToolbarPinned = useLayoutStore((s) => s.toolbarPinned);
+
+  if (!toolbar) return null;
+
+  const toolsVisible = pinned || userToolbarPinned || hovered || focused;
+
+  return (
+    <>
+      <div
+        className="absolute inset-x-0 top-0 z-20 h-8"
+        onMouseEnter={enter}
+        onMouseLeave={leave}
+        aria-hidden
+      />
+      <div
+        className="absolute inset-x-0 top-0 z-30 flex flex-col gap-px px-2"
+        onMouseEnter={enter}
+        onMouseLeave={leave}
+        onFocusCapture={() => setFocused(true)}
+        onBlurCapture={(e) => {
+          if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+            setFocused(false);
+          }
+        }}
+      >
+        {toolbar && toolsVisible ? (
+          <div className="hl-group overflow-hidden rounded-md border border-slate-200/80 bg-white/95 shadow-md backdrop-blur-sm">
+            {toolbar}
+          </div>
+        ) : null}
+      </div>
+    </>
+  );
+}
 
 interface WorkspaceShellProps {
   children: ReactNode;
   inspector?: ReactNode;
   inspectorTitle?: string;
+  inspectorHint?: ReactNode;
+  /** Keep a VS Code-style icon rail when the inspector panel is closed. */
+  inspectorHasRail?: boolean;
   /** Secondary panel to the left of main content (e.g. page list). */
   leftPanel?: ReactNode;
   leftPanelTitle?: string;
-  /** Replace the default project sidebar (e.g. Model Studio nav). */
+  leftPanelHint?: ReactNode;
+  /** Right-hand properties panel. Defaults to an empty Properties placeholder. */
   sidebar?: ReactNode;
+  /** Left Project tab content. Defaults to the project / drawing browser. */
+  projectPanel?: ReactNode;
   mainClassName?: string;
   showSidebar?: boolean;
   statusText?: string;
-  footerLeading?: ReactNode;
   hideTopBar?: boolean;
+  /** Drawing tools; floats over the main panel on hover or when pinned. */
+  toolbar?: ReactNode;
+  /** Keep the floating toolbar visible (active tool, busy work). */
+  toolbarPinned?: boolean;
   /** When false, Ctrl/Cmd+N does not open New project. */
   allowNewProjectShortcut?: boolean;
+  /** Icon-only left rail (e.g. Model Studio). Replaces the project inspector. */
+  activityRail?: ReactNode;
 }
 
 export function WorkspaceShell({
   children,
   inspector,
   inspectorTitle = "Inspector",
+  inspectorHint,
+  inspectorHasRail = false,
   leftPanel,
   leftPanelTitle = "Pages",
+  leftPanelHint,
   sidebar,
+  projectPanel,
   mainClassName,
   showSidebar = true,
   statusText,
-  footerLeading,
-  hideTopBar = false,
+  hideTopBar: _hideTopBar = false,
+  toolbar,
+  toolbarPinned = false,
   allowNewProjectShortcut = true,
+  activityRail,
 }: WorkspaceShellProps) {
   const router = useRouter();
   const sidebarOpen = useLayoutStore((s) => s.sidebarOpen);
@@ -86,42 +212,129 @@ export function WorkspaceShell({
     return () => window.removeEventListener("keydown", onKey);
   }, [allowNewProjectShortcut, router, toggleSidebar, toggleInspector]);
 
-  const showInspector = Boolean(inspector) && inspectorOpen;
+  const [shellTab, setShellTab] = useState("project");
+  const projectContent = projectPanel ?? <ProjectSidebar />;
+  const shellTabs = [
+    PROJECT_TAB,
+    ...(inspector ? [{ id: PAGE_TAB_ID, label: inspectorTitle, title: inspectorTitle }] : []),
+  ];
+  const shellInspector = (
+    <VerticalInspectorTabs tabs={shellTabs} activeId={shellTab} onChange={setShellTab}>
+      {shellTab === "project" ? projectContent : inspector}
+    </VerticalInspectorTabs>
+  );
+  const inspectorNode = inspectorHasRail ? inspector : shellInspector;
+  const hasInspectorContent = Boolean(inspector);
+  const showInspector = inspectorOpen && hasInspectorContent;
   const showLeftPanel = Boolean(leftPanel) && leftPanelOpen;
+  const effectiveShowSidebar = showSidebar && !activityRail;
+
+  const inspectorPanel = hasInspectorContent ? (
+    activityRail ? (
+      <Panel
+        title={inspectorTitle}
+        hint={inspectorHint}
+        bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden p-0"
+        action={
+          <PanelCloseButton onClick={toggleInspector} title={`Hide ${inspectorTitle}`} />
+        }
+      >
+        {inspector}
+      </Panel>
+    ) : (
+      inspectorNode
+    )
+  ) : null;
+
+  const collapsedInspectorToggle = hasInspectorContent && !inspectorOpen ? (
+    <button
+      type="button"
+      title={`Show ${inspectorTitle}`}
+      onClick={toggleInspector}
+      className="hl-group flex w-7 shrink-0 items-center justify-center text-slate-500 hover:bg-[var(--hl-raised)]"
+    >
+      <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden>
+        <path
+          d="M3.2 1.6 6.8 5 3.2 8.4"
+          stroke="currentColor"
+          strokeWidth="1.4"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    </button>
+  ) : null;
 
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-slate-100">
-      <AppMenuBar />
-      {!hideTopBar ? <AppTopBar /> : null}
-      <div className="flex min-h-0 flex-1">
-        {showSidebar && sidebarOpen ? (
+    <div className="hl-workbench flex h-full max-h-full min-h-0 flex-col overflow-hidden">
+      <div className="hl-chrome shrink-0">
+        <AppMenuBar />
+      </div>
+      <div className="hl-chrome hl-workbench-columns hl-workbench-body">
+        {activityRail ? (
           <>
-            <div className="flex h-full shrink-0 flex-col" style={{ width: sidebarWidth }}>
-              {sidebar ?? <ProjectSidebar />}
-            </div>
-            <PanelResizeHandle
-              edge="right"
-              value={sidebarWidth}
-              onChange={setSidebarWidth}
-              min={SIDEBAR_WIDTH.min}
-              max={SIDEBAR_WIDTH.max}
-            />
+            <aside
+              className="flex h-full min-h-0 min-w-0 shrink-0 flex-col overflow-hidden"
+              style={{ width: ACTIVITY_BAR_WIDTH }}
+            >
+              {activityRail}
+            </aside>
+            {showInspector ? (
+              <>
+                <aside
+                  className="flex h-full min-h-0 min-w-0 shrink-0 flex-col overflow-hidden"
+                  style={{ width: inspectorWidth }}
+                >
+                  {inspectorPanel}
+                </aside>
+                <PanelResizeHandle
+                  edge="right"
+                  value={inspectorWidth}
+                  onChange={setInspectorWidth}
+                  min={INSPECTOR_WIDTH.min}
+                  max={INSPECTOR_WIDTH.max}
+                />
+              </>
+            ) : (
+              collapsedInspectorToggle
+            )}
           </>
-        ) : null}
+        ) : (
+          <>
+            <aside
+              className="flex h-full min-h-0 min-w-0 shrink-0 flex-col overflow-hidden"
+              style={{
+                width: showInspector ? inspectorWidth : ACTIVITY_BAR_WIDTH,
+              }}
+            >
+              {inspectorNode}
+            </aside>
+            {showInspector ? (
+              <PanelResizeHandle
+                edge="right"
+                value={inspectorWidth}
+                onChange={setInspectorWidth}
+                min={INSPECTOR_WIDTH.min}
+                max={INSPECTOR_WIDTH.max}
+              />
+            ) : null}
+          </>
+        )}
 
         {showLeftPanel ? (
           <>
             <aside
-              className="flex h-full shrink-0 flex-col border-r border-slate-200 bg-white"
+              className="hl-group flex h-full min-h-0 shrink-0 flex-col overflow-hidden"
               style={{ width: leftPanelWidth }}
             >
               <Panel
                 title={leftPanelTitle}
-                bodyClassName="overflow-y-auto p-1.5"
+                hint={leftPanelHint}
+                bodyClassName="overflow-y-auto p-2"
                 action={
                   <button
                     type="button"
-                    className="text-[10px] text-slate-500 hover:text-slate-800"
+                    className="rounded px-1.5 py-0.5 text-xs text-slate-500 hover:bg-[var(--hl-raised)] hover:text-slate-800"
                     onClick={toggleLeftPanel}
                     title="Hide pages panel"
                   >
@@ -145,74 +358,75 @@ export function WorkspaceShell({
             type="button"
             title={`Show ${leftPanelTitle}`}
             onClick={toggleLeftPanel}
-            className="flex w-5 shrink-0 items-center justify-center border-r border-slate-200 bg-slate-50 text-[10px] text-slate-500 hover:bg-slate-100"
+            className="hl-group flex w-7 shrink-0 items-center justify-center text-slate-500 hover:bg-[var(--hl-raised)]"
           >
-            ▸
+            <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden>
+              <path d="M3.2 1.6 6.8 5 3.2 8.4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
           </button>
         ) : null}
 
-        <main
-          className={cn(
-            "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden",
-            mainClassName,
-          )}
-        >
-          {children}
-        </main>
+        <div className="hl-panel-stack min-h-0 min-w-0 flex-1 overflow-hidden">
+          <main
+            className={cn(
+              "hl-group relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden",
+              mainClassName,
+            )}
+          >
+            <FloatingMainChrome toolbar={toolbar} pinned={toolbarPinned} />
+            {children}
+          </main>
+          <footer className="hl-group flex h-9 shrink-0 items-center gap-3 px-3 text-xs text-slate-600">
+            <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
+              <AppTopBar />
+            </div>
+            <span className="min-w-0 shrink-0 truncate text-right text-slate-500">
+              {statusText ?? "Ready"}
+            </span>
+          </footer>
+        </div>
 
-        {showInspector ? (
+        {effectiveShowSidebar && sidebarOpen ? (
           <>
             <PanelResizeHandle
               edge="left"
-              value={inspectorWidth}
-              onChange={setInspectorWidth}
-              min={INSPECTOR_WIDTH.min}
-              max={INSPECTOR_WIDTH.max}
+              value={sidebarWidth}
+              onChange={setSidebarWidth}
+              min={SIDEBAR_WIDTH.min}
+              max={SIDEBAR_WIDTH.max}
             />
-            <aside
-              className="flex h-full shrink-0 flex-col border-l border-slate-200 bg-white"
-              style={{ width: inspectorWidth }}
+            <div
+              className="flex h-full max-h-full min-h-0 shrink-0 flex-col overflow-hidden"
+              style={{ width: sidebarWidth }}
             >
-              <Panel
-                title={inspectorTitle}
-                bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden p-0"
-                action={
-                  <button
-                    type="button"
-                    className="text-[10px] text-slate-500 hover:text-slate-800"
-                    onClick={toggleInspector}
-                    title="Hide inspector"
-                  >
-                    Hide
-                  </button>
-                }
-              >
-                {inspector}
-              </Panel>
-            </aside>
+              {sidebar ? (
+                sidebar
+              ) : (
+                <div className="hl-group flex min-h-0 flex-1 flex-col overflow-hidden">
+                  <PropertiesPanel onClose={toggleSidebar} />
+                </div>
+              )}
+            </div>
           </>
+        ) : effectiveShowSidebar ? (
+          <button
+            type="button"
+            title="Show properties panel"
+            onClick={toggleSidebar}
+            className="hl-group flex w-7 shrink-0 items-center justify-center text-slate-500 hover:bg-[var(--hl-raised)]"
+          >
+            <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden>
+              <path
+                d="M6.8 1.6 3.2 5l3.6 3.4"
+                stroke="currentColor"
+                strokeWidth="1.4"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
         ) : null}
       </div>
-      <footer
-        className={cn(
-          "flex shrink-0 items-center justify-between gap-2 border-t border-slate-200 bg-slate-50 px-2 text-[10px] text-slate-500",
-          footerLeading ? "h-8" : "h-6 px-3",
-        )}
-      >
-        <div className="flex min-w-0 flex-1 items-center gap-2">
-          {footerLeading}
-          <span className="truncate">{statusText ?? "Ready"}</span>
-        </div>
-        <span className="shrink-0 tabular-nums">
-          {[
-            showSidebar && (sidebarOpen ? "Sidebar" : null),
-            showLeftPanel ? leftPanelTitle : null,
-            inspector ? (inspectorOpen ? "Inspector" : null) : null,
-          ]
-            .filter(Boolean)
-            .join(" · ") || "Panels hidden"}
-        </span>
-      </footer>
     </div>
   );
 }

@@ -5,9 +5,13 @@ import {
   levelIndexFromName,
   parseLevelName,
   parseUnitIds,
+  pickUnitIdsFromOcrMeta,
   pickLevelFromLines,
   pickLevelFromOcrMeta,
   pickUnitIdsFromPage,
+  parseManualUnitIds,
+  addManualUnitIds,
+  removeManualUnitId,
   resolveBuildingName,
   resolveFloorPageMeta,
   resolvePageLevelName,
@@ -248,5 +252,46 @@ describe("parseUnitIds", () => {
       isFloorPlan: true,
       drawingOcrMeta: { lines: [{ text: "Apt 5A", confidence: 0.9 }] },
     })).toEqual(["5A"]);
+  });
+
+  it("reads U34 and Unit No. 101, not a bare number", () => {
+    expect(parseUnitIds("apartment 37  U34  Unit No. 101")).toEqual(["37", "34", "101"]);
+    expect(parseUnitIds("37  203  1500")).toEqual([]);
+  });
+
+  it("keeps Unit A but drops drawing abbreviations from apartment/unit OCR", () => {
+    expect(parseUnitIds("Unit A  APT B")).toEqual(["A", "B"]);
+    expect(parseUnitIds("apartment EN")).toEqual([]);
+    expect(parseUnitIds("UNIT CT  APARTMENT ENT")).toEqual([]);
+    expect(pickUnitIdsFromOcrMeta({ unitIds: ["EN", "CT", "101"], lines: [] })).toEqual(["101"]);
+  });
+});
+
+describe("manual unit ids", () => {
+  const page: PlanPage = {
+    id: "p1",
+    pageNumber: 1,
+    imagePath: "x",
+    widthPx: 1,
+    heightPx: 1,
+    isFloorPlan: true,
+  };
+
+  it("accepts typed dwelling numbers and unit prefixes", () => {
+    expect(parseManualUnitIds("101")).toEqual(["101"]);
+    expect(parseManualUnitIds("Unit 12B, apt 13")).toEqual(["12B", "13"]);
+    expect(parseManualUnitIds("EN")).toEqual([]);
+  });
+
+  it("stores manual ids ahead of OCR and keeps them after OCR overwrites", () => {
+    const withManual = addManualUnitIds(page, "101");
+    expect(withManual.manualUnitIds).toEqual(["101"]);
+    expect(pickUnitIdsFromPage(withManual)).toEqual(["101"]);
+    const afterOcr = {
+      ...withManual,
+      ocrMeta: { unitIds: ["202"], lines: [] },
+    };
+    expect(pickUnitIdsFromPage(afterOcr)).toEqual(["101", "202"]);
+    expect(pickUnitIdsFromPage(removeManualUnitId(afterOcr, "Unit 101"))).toEqual(["202"]);
   });
 });

@@ -9,7 +9,8 @@ import numpy as np
 from PIL import Image
 
 from app.config import Settings, get_settings
-from app.yolo.classes import CLASS_NAMES, display_label, entity_type_for, room_type_for
+from app.yolo.classes import CLASS_NAMES, display_label, entity_type_for, opening_type_for, room_type_for
+from app.yolo.compass_keypoints import attach_keypoints, extract_ultralytics_keypoints, transform_region_keypoints
 from app.yolo.crop import (
     crop_page,
     crop_page_normalized,
@@ -136,13 +137,15 @@ def detect_ready(settings: Settings | None = None) -> bool:
     if layout_enabled(settings) or room_enabled(settings):
         return True
     from app.yolo.mitunet import mitunet_ready
-    from app.yolo.roboflow import roboflow_ready
+    from app.yolo.roboflow import roboflow_ready, roboflow_wall_ready
     from app.yolo.mmdet_wall import mmdet_wall_ready
     from app.yolo.floordata import floordata_ready
 
     if roboflow_ready(settings):
         return True
     backend = (settings.wall_backend or "").strip().lower()
+    if backend == "roboflow" and roboflow_wall_ready(settings):
+        return True
     if backend == "mitunet" and mitunet_ready(settings):
         return True
     if backend == "yolo" and wall_yolo_ready(settings):
@@ -160,10 +163,10 @@ def default_room_weights_path() -> Path:
 
 def resolve_room_weights(settings: Settings | None = None) -> str:
     settings = settings or get_settings()
+    local_cache = default_room_weights_path()
     raw = settings.yolo_room_weights.strip()
     if not raw:
-        return ""
-    local_cache = default_room_weights_path()
+        return str(local_cache) if local_cache.is_file() else ""
     if is_remote_weights(raw):
         if raw in {HF_ROOM_WEIGHTS, HF_ROOM_HUB, f"hf://{HF_ROOM_HUB}"} and local_cache.is_file():
             return str(local_cache)
@@ -176,12 +179,12 @@ def resolve_room_weights(settings: Settings | None = None) -> str:
 
 def room_yolo_ready(settings: Settings | None = None) -> bool:
     settings = settings or get_settings()
-    raw = settings.yolo_room_weights.strip()
-    if not raw:
-        return False
-    if is_remote_weights(raw):
+    source = resolve_room_weights(settings)
+    if not source:
+        return default_room_weights_path().is_file()
+    if is_remote_weights(source):
         return True
-    return Path(resolve_room_weights(settings)).is_file()
+    return Path(source).is_file()
 
 
 def room_enabled(settings: Settings | None = None) -> bool:
@@ -316,6 +319,19 @@ def _predict_regions(model, rgb: np.ndarray, *, imgsz: int, conf: float, device:
     return regions_from_ultralytics(result, src_w=src_w, src_h=src_h, target_w=src_w, target_h=src_h)
 
 
+def _dedupe_regions_by_id(regions: list[DetectedRegion]) -> list[DetectedRegion]:
+    seen: set[str] = set()
+    out: list[DetectedRegion] = []
+    for region in regions:
+        rid = str(region.id or "")
+        if rid and rid in seen:
+            continue
+        if rid:
+            seen.add(rid)
+        out.append(region)
+    return out
+
+
 def _scale_region_to_original(region: DetectedRegion, sx: float, sy: float) -> DetectedRegion:
     """Return a scaled copy — never mutate ``region`` (stream progress must not alter collected)."""
     if abs(sx - 1.0) <= 1e-9 and abs(sy - 1.0) <= 1e-9:
@@ -324,6 +340,7 @@ def _scale_region_to_original(region: DetectedRegion, sx: float, sy: float) -> D
     crop_px = attrs.get("cropPx")
     if isinstance(crop_px, dict):
         attrs["cropPx"] = scale_crop_px(crop_px, sx, sy)
+    transform_region_keypoints(attrs, sx=sx, sy=sy)
     return DetectedRegion(
         id=region.id,
         type=region.type,
@@ -342,11 +359,24 @@ def _append_region(
     conf: float,
     poly: list[tuple[float, float]],
     names: dict,
+    keypoints: list[dict] | None = None,
 ) -> None:
     if len(poly) < 3:
         return
     label_raw = _label_for_class(class_id, names)
     label = display_label(label_raw)
+    attributes: dict[str, object] = {
+        "roomType": room_type_for(label_raw),
+        "label": label,
+        "source": "yolo",
+        "classId": int(class_id),
+        **(
+            {"openingType": ot}
+            if (ot := opening_type_for(label_raw))
+            else {}
+        ),
+    }
+    attach_keypoints(attributes, keypoints)
     regions.append(
         DetectedRegion(
             id=str(uuid4()),
@@ -355,12 +385,7 @@ def _append_region(
             confidence=round(float(conf), 4),
             polygon=poly,
             bbox=_bbox(poly),
-            attributes={
-                "roomType": room_type_for(label_raw),
-                "label": label,
-                "source": "yolo",
-                "classId": int(class_id),
-            },
+            attributes=attributes,
         )
     )
 
@@ -387,7 +412,14 @@ def regions_from_ultralytics(
         for i, class_id in enumerate(cls_ids):
             pts = np.asarray(corners[i], dtype=np.float64).reshape(-1, 2)
             poly = [(float(x) * sx, float(y) * sy) for x, y in pts]
-            _append_region(regions, class_id=int(class_id), conf=float(confs[i]), poly=poly, names=names)
+            _append_region(
+                regions,
+                class_id=int(class_id),
+                conf=float(confs[i]),
+                poly=poly,
+                names=names,
+                keypoints=extract_ultralytics_keypoints(result, i, sx=sx, sy=sy),
+            )
         return regions
 
     boxes = getattr(result, "boxes", None)
@@ -415,7 +447,14 @@ def regions_from_ultralytics(
                 (float(x2) * sx, float(y2) * sy),
                 (float(x1) * sx, float(y2) * sy),
             ]
-        _append_region(regions, class_id=int(class_id), conf=float(confs[i]), poly=poly, names=names)
+        _append_region(
+            regions,
+            class_id=int(class_id),
+            conf=float(confs[i]),
+            poly=poly,
+            names=names,
+            keypoints=extract_ultralytics_keypoints(result, i, sx=sx, sy=sy),
+        )
     return regions
 
 
@@ -429,6 +468,7 @@ def _offset_into_page(
     for region in regions:
         region.polygon = offset_polygon(region.polygon, crop.x0, crop.y0)
         region.bbox = offset_bbox(region.bbox, crop.x0, crop.y0)
+        transform_region_keypoints(region.attributes, dx=float(crop.x0), dy=float(crop.y0))
         region.attributes["parentId"] = parent_id
         region.attributes["source"] = source
     return regions
@@ -548,11 +588,21 @@ def detect_page_regions(
     wall_src: list[DetectedRegion] = []
     room_src: list[DetectedRegion] = []
     warning: str | None = None
-    from app.yolo.roboflow import detect_roboflow_regions, is_wall_region, roboflow_ready
+    from app.yolo.roboflow import (
+        detect_roboflow_floorplan_seg_regions,
+        detect_roboflow_room_regions,
+        detect_roboflow_wall_regions,
+        is_wall_region,
+        is_opening_region,
+        roboflow_floorplan_seg_ready,
+        roboflow_room_ready,
+        roboflow_wall_ready,
+    )
+    from app.yolo.classes import region_matches_detect_task
 
+    detect_task = (getattr(settings, "detect_task", None) or "walls").strip().lower()
     wall_backend = (settings.wall_backend or "mitunet").strip().lower()
-    # Only run Roboflow when explicitly selected (wall:roboflow).
-    rf_on = wall_backend == "roboflow" and roboflow_ready(settings)
+    room_backend = (getattr(settings, "room_backend", None) or "architect").strip().lower()
     from app.yolo.mitunet import (
         MITUNET_MODEL_ID,
         mitunet_ready,
@@ -562,18 +612,24 @@ def detect_page_regions(
     from app.yolo.floordata import FLOORDATA_MODEL_IDS, detect_floordata_walls, floordata_ready
     from app.yolo.wall_registry import FLOORDATA_WALL_BACKENDS, LEGACY_WALL_BACKENDS
 
-    mitunet_on = wall_backend == "mitunet" and mitunet_ready(settings)
-    mmdet_on = wall_backend in LEGACY_WALL_BACKENDS and mmdet_wall_ready(settings, wall_backend)
-    floordata_on = wall_backend in FLOORDATA_WALL_BACKENDS and floordata_ready(settings, wall_backend)
-    walls_on = (
-        (not rf_on)
-        and (not mitunet_on)
-        and (not mmdet_on)
-        and (not floordata_on)
-        and wall_backend == "yolo"
-        and wall_yolo_ready(settings)
+    walls_task = detect_task in {"walls", "wall_segmentation", ""}
+    rooms_task = detect_task in {"rooms", "room_types"}
+    structural_task = detect_task in {"structural", "structural_detection"}
+    openings_task = detect_task in {"openings", "opening_detection"}
+    objects_task = detect_task in {"objects", "object_detection"}
+
+    rf_on = walls_task and wall_backend == "roboflow" and roboflow_wall_ready(settings)
+    rf_seg_structural_on = structural_task and roboflow_floorplan_seg_ready(settings)
+    mitunet_on = walls_task and wall_backend == "mitunet" and mitunet_ready(settings)
+    mmdet_on = False
+    floordata_on = False
+    walls_on = False
+    rooms_on = (
+        (rooms_task or openings_task or objects_task)
+        and room_backend != "roboflow"
+        and room_yolo_ready(settings)
     )
-    rooms_on = (not rf_on) and room_enabled(settings)
+    rf_rooms_on = rooms_task and room_backend == "roboflow" and roboflow_room_ready(settings)
 
     jobs: list[tuple[str, object]] = []
     if client_crop:
@@ -597,29 +653,56 @@ def detect_page_regions(
 
     for parent_id, crop in jobs:
         tile_in_drawing = parent_id != "page"
+        use_tiles = bool(getattr(settings, "detect_tile_enabled", True))
         if rf_on:
             from app.yolo.tiling import detect_on_crop
 
             rf_regions = detect_on_crop(
                 crop.rgb,
                 settings=settings,
-                predict_fn=lambda crop_rgb: detect_roboflow_regions(
+                predict_fn=lambda crop_rgb: detect_roboflow_wall_regions(
                     crop_rgb, settings=settings
                 ),
                 tile_size=int(settings.detect_tile_size or 640),
                 on_progress=_tile_progress(crop),
                 cancel_check=cancel_check,
-                use_tiling=tile_in_drawing,
+                use_tiling=use_tiles,
             )
             rf_regions = _offset_into_page(
                 rf_regions, crop, parent_id=parent_id, source="roboflow"
             )
             for region in rf_regions:
                 if is_wall_region(region):
-                    if not mitunet_on:
-                        wall_src.append(region)
-                else:
+                    wall_src.append(region)
+                elif not walls_task:
                     room_src.append(region)
+        if rf_seg_structural_on:
+            from app.yolo.tiling import detect_on_crop
+
+            seg_regions = detect_on_crop(
+                crop.rgb,
+                settings=settings,
+                predict_fn=lambda crop_rgb: detect_roboflow_floorplan_seg_regions(
+                    crop_rgb, settings=settings, detect_task="structural"
+                ),
+                tile_size=int(settings.detect_tile_size or 640),
+                on_progress=_tile_progress(crop),
+                cancel_check=cancel_check,
+                use_tiling=use_tiles,
+            )
+            seg_regions = _offset_into_page(
+                seg_regions, crop, parent_id=parent_id, source="roboflow-floorplan-seg"
+            )
+            for region in seg_regions:
+                attrs = dict(region.attributes or {})
+                attrs["detectFamily"] = "structural"
+                region.attributes = attrs
+                if is_wall_region(region):
+                    wall_src.append(region)
+                elif is_opening_region(region):
+                    room_src.append(region)
+                else:
+                    wall_src.append(region)
         if mitunet_on:
             from app.yolo.tiling import detect_on_crop
 
@@ -651,7 +734,7 @@ def detect_page_regions(
                 tile_size=int(settings.mitunet_wall_imgsz or settings.detect_tile_size or 512),
                 on_progress=_tile_progress(crop),
                 cancel_check=cancel_check,
-                use_tiling=tile_in_drawing,
+                use_tiling=bool(getattr(settings, "detect_tile_enabled", True)),
             )
             wall_src.extend(
                 _offset_into_page(
@@ -733,11 +816,35 @@ def detect_page_regions(
                 tile_size=int(settings.yolo_room_imgsz or settings.detect_tile_size or 640),
                 on_progress=_tile_progress(crop),
                 cancel_check=cancel_check,
-                use_tiling=tile_in_drawing,
+                use_tiling=use_tiles,
             )
             room_src.extend(
                 _offset_into_page(rooms, crop, parent_id=parent_id, source="yolo_rooms")
             )
+        if rf_rooms_on:
+            from app.yolo.tiling import detect_on_crop
+
+            rf_rooms = detect_on_crop(
+                crop.rgb,
+                settings=settings,
+                predict_fn=lambda crop_rgb: detect_roboflow_room_regions(
+                    crop_rgb, settings=settings
+                ),
+                tile_size=int(settings.detect_tile_size or 640),
+                on_progress=_tile_progress(crop),
+                cancel_check=cancel_check,
+                use_tiling=use_tiles,
+            )
+            room_src.extend(
+                _offset_into_page(rf_rooms, crop, parent_id=parent_id, source="roboflow-rooms")
+            )
+
+    if rooms_task:
+        room_src = [r for r in room_src if region_matches_detect_task(r.type, "rooms")]
+    elif openings_task:
+        room_src = [r for r in room_src if region_matches_detect_task(r.type, "openings")]
+    elif objects_task:
+        room_src = [r for r in room_src if region_matches_detect_task(r.type, "objects")]
 
     if layout_on and not layout_src and not client_crop:
         warning = (
@@ -754,14 +861,30 @@ def detect_page_regions(
             "No drawing area region — run layout detect or draw a drawing area box first. "
             "Ran detection on the full page (single pass, not tiled)."
         )
-    elif rf_on and not mitunet_on and not wall_src and not room_src:
-        warning = "Roboflow floorplan-iculh found no instances on this page."
+    elif rf_on and not mitunet_on and not wall_src:
+        wall_model = getattr(settings, "roboflow_wall_model_id", None) or "archvision_wall_detect/1"
+        warning = f"Roboflow {wall_model} found no walls on this page."
+    elif rf_seg_structural_on and not wall_src:
+        seg_model = (
+            getattr(settings, "roboflow_floorplan_seg_model_id", None)
+            or "floorplan-segmentation-imdze/4"
+        )
+        warning = f"Roboflow {seg_model} found no walls on this page."
     elif (mitunet_on or mmdet_on or floordata_on or walls_on) and not wall_src and rooms_on and not room_src:
         warning = "No walls or fixtures found on this page."
     elif (mitunet_on or mmdet_on or floordata_on or walls_on) and not wall_src:
         warning = "Wall detector found no segments on this page."
-    elif rooms_on and not room_src:
-        warning = "No doors, windows, or fixtures found on this page."
+    elif (rooms_on or rf_rooms_on) and not room_src:
+        if rf_rooms_on:
+            warning = "Roboflow floorplan-9fxye found no rooms on this page."
+        elif rooms_task:
+            warning = "No room types found on this page."
+        elif openings_task:
+            warning = "No doors or windows found on this page."
+        elif objects_task:
+            warning = "No stairs or lifts found on this page."
+        else:
+            warning = "No rooms or objects found on this page."
 
     sx = target_w / src_w if src_w else 1.0
     sy = target_h / src_h if src_h else 1.0
@@ -773,14 +896,18 @@ def detect_page_regions(
 
     regions = [
         _scale_region_to_original(region, sx, sy)
-        for region in [*layout_src, *wall_src, *room_src]
+        for region in _dedupe_regions_by_id([*layout_src, *wall_src, *room_src])
     ]
 
     parts: list[str] = []
     if layout_on:
         parts.append(HF_LAYOUT_MODEL_ID)
     if rf_on:
-        parts.append(settings.roboflow_model_id.replace("/", "-"))
+        wall_model = getattr(settings, "roboflow_wall_model_id", None) or "archvision_wall_detect/1"
+        parts.append(str(wall_model).replace("/", "-"))
+    if rf_rooms_on:
+        room_model = getattr(settings, "roboflow_room_model_id", None) or "floorplan-9fxye/1"
+        parts.append(str(room_model).replace("/", "-"))
     if wall_src and mitunet_on:
         parts.append(MITUNET_MODEL_ID)
     elif wall_src and mmdet_on:
@@ -801,8 +928,12 @@ def detect_page_regions(
         from app.yolo.wall_registry import resolve_legacy_wall_weights_for_backend
 
         weights = resolve_legacy_wall_weights_for_backend(settings, wall_backend)
+    elif rf_on:
+        weights = getattr(settings, "roboflow_wall_model_id", None) or "archvision_wall_detect/1"
     elif rooms_on:
         weights = resolve_room_weights(settings)
+    elif rf_rooms_on:
+        weights = getattr(settings, "roboflow_room_model_id", None) or "floorplan-9fxye/1"
     else:
         weights = resolve_wall_weights(settings)
     return DetectResult(

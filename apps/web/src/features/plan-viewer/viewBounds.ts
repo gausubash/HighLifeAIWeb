@@ -19,8 +19,42 @@ export function clampPanToViewport(
 }
 
 export const MIN_VIEW_ZOOM = 1;
-export const MAX_VIEW_ZOOM = 5;
+/** 1500% of fit. */
+export const MAX_VIEW_ZOOM = 15;
+
+export const WHEEL_ZOOM_STEP = 1;
+export const WHEEL_ZOOM_STEP_FAST = 3;
+export const BUTTON_ZOOM_STEP = 1;
+export const BUTTON_ZOOM_STEP_FAST = 3;
 
 export function clampZoom(zoom: number): number {
   return Math.min(MAX_VIEW_ZOOM, Math.max(MIN_VIEW_ZOOM, zoom));
+}
+
+export function zoomDeltaFromWheel(altKey: boolean, deltaY: number): number {
+  const step = altKey ? WHEEL_ZOOM_STEP_FAST : WHEEL_ZOOM_STEP;
+  return deltaY > 0 ? -step : step;
+}
+
+export function zoomDeltaFromButton(altKey: boolean, direction: 1 | -1): number {
+  return direction * (altKey ? BUTTON_ZOOM_STEP_FAST : BUTTON_ZOOM_STEP);
+}
+
+/** New pan so `origin` (viewport-relative) stays under the cursor after zoom. */
+export function panForZoomAtPoint(
+  panX: number,
+  panY: number,
+  fromZoom: number,
+  toZoom: number,
+  originX: number,
+  originY: number,
+  viewportW: number,
+  viewportH: number,
+): { x: number; y: number } {
+  if (fromZoom <= 0 || fromZoom === toZoom) return { x: panX, y: panY };
+  const scale = toZoom / fromZoom;
+  return {
+    x: panX * scale + (originX - viewportW / 2) * (1 - scale),
+    y: panY * scale + (originY - viewportH / 2) * (1 - scale),
+  };
 }

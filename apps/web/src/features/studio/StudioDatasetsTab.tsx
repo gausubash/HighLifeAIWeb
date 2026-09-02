@@ -2,21 +2,27 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type InputHTMLAttributes, type ReactNode } from "react";
 import { WorkspaceShell } from "@/components/shell/WorkspaceShell";
+import { HeadingHint } from "@/components/ui/HoverHint";
 import {
   categoryLabel,
   FALLBACK_DATASET_CATEGORIES,
+  normalizeStudioCategory,
   type StudioDatasetCategorySpec,
 } from "@/lib/studio/categories";
+import { mergeAnnotateClasses } from "@/features/plan-editor/labelClasses";
+import { CropExportPanel } from "@/features/studio/CropExportPanel";
 import {
   convertDatasetPdfs,
   convertDatasetToYolo,
   createDataset,
   deleteDataset,
   deleteDatasetPage,
+  exportAnnotationCrops,
   getDataset,
   listBaseModels,
   listDatasets,
   setDatasetPageSplit,
+  updateDatasetPurpose,
   studioExportYoloZipUrl,
   unlinkLocalPath,
   uploadDatasetFolder,
@@ -25,7 +31,7 @@ import {
 import type { MlDataset, StudioPage } from "@/lib/studio/types";
 
 interface StudioDatasetsTabProps {
-  sidebar?: ReactNode;
+  activityRail?: ReactNode;
   initialDatasetId?: string;
   onAnnotate?: (datasetId: string) => void;
   onOpenTrain?: (datasetId: string) => void;
@@ -44,7 +50,7 @@ function folderNameFromFiles(files: File[]): string {
 }
 
 export function StudioDatasetsTab({
-  sidebar,
+  activityRail,
   initialDatasetId,
   onAnnotate,
   onOpenTrain,
@@ -52,6 +58,7 @@ export function StudioDatasetsTab({
 }: StudioDatasetsTabProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
+  const uploadIntoIdRef = useRef<string>("");
   const [datasets, setDatasets] = useState<MlDataset[]>([]);
   const [datasetId, setDatasetId] = useState(initialDatasetId || "");
   const [dataset, setDataset] = useState<MlDataset | null>(null);
@@ -66,6 +73,9 @@ export function StudioDatasetsTab({
   const [categorySpecs, setCategorySpecs] = useState<StudioDatasetCategorySpec[]>(
     FALLBACK_DATASET_CATEGORIES,
   );
+  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [newDatasetName, setNewDatasetName] = useState("");
+  const [newDatasetCategory, setNewDatasetCategory] = useState<string>("north_arrow");
 
   const selectedCategorySpec = useMemo(
     () =>
@@ -159,6 +169,7 @@ export function StudioDatasetsTab({
   }, [datasetId, datasets]);
 
   useEffect(() => {
+    uploadIntoIdRef.current = datasetId;
     if (!datasetId) {
       setDataset(null);
       setYoloResult(null);
@@ -177,6 +188,63 @@ export function StudioDatasetsTab({
       cancelled = true;
     };
   }, [datasetId]);
+
+  const onCreateDataset = async () => {
+    const spec =
+      categorySpecs.find((c) => c.id === newDatasetCategory) ??
+      FALLBACK_DATASET_CATEGORIES.find((c) => c.id === newDatasetCategory) ??
+      FALLBACK_DATASET_CATEGORIES[0];
+    const name = newDatasetName.trim() || `${spec.label} dataset`;
+    setBusy(true);
+    setError(null);
+    try {
+      const created = await createDataset({
+        name,
+        task: spec.task,
+        category: spec.id,
+        classNames: [...spec.class_names],
+      });
+      setShowCreateForm(false);
+      setNewDatasetName("");
+      setDatasetCategory(spec.id);
+      setMessage(`Created “${created.name}”. Upload files below to add pages.`);
+      await refresh(created.id);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not create dataset.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const openCreateForm = () => {
+    setShowCreateForm(true);
+    setNewDatasetCategory(datasetCategory || "north_arrow");
+    if (!newDatasetName.trim()) {
+      const spec =
+        categorySpecs.find((c) => c.id === (datasetCategory || "north_arrow")) ??
+        FALLBACK_DATASET_CATEGORIES.find((c) => c.id === "north_arrow");
+      setNewDatasetName(spec ? `${spec.label} dataset` : "New dataset");
+    }
+  };
+
+  const onChangePurpose = async (id: string, category: string) => {
+    if (!category) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const next = await updateDatasetPurpose(id, category);
+      setMessage(`“${next.name}” is now ${categoryLabel(next.category)} (${next.task}).`);
+      if (id === datasetId) {
+        setDatasetCategory(category);
+        setDataset(next);
+      }
+      await refresh(datasetId || id);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not change dataset purpose.");
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const onDeleteDataset = async (id: string, label: string) => {
     if (
@@ -215,9 +283,12 @@ export function StudioDatasetsTab({
         : `Uploading ${files.length} file(s) as ${uploadSplit}…`,
     );
     try {
-      let id = datasetId;
+      let id = uploadIntoIdRef.current || datasetId;
       if (!id) {
-        const spec = selectedCategorySpec ?? FALLBACK_DATASET_CATEGORIES[3];
+        const spec =
+          selectedCategorySpec ??
+          FALLBACK_DATASET_CATEGORIES.find((c) => c.id === "wall_segmentation") ??
+          FALLBACK_DATASET_CATEGORIES[0];
         const created = await createDataset({
           name: folderNameFromFiles(files),
           task: spec.task,
@@ -226,6 +297,10 @@ export function StudioDatasetsTab({
         });
         id = created.id;
         setDatasetId(id);
+        uploadIntoIdRef.current = id;
+      } else {
+        setDatasetId(id);
+        uploadIntoIdRef.current = id;
       }
       const next = await uploadDatasetFolder(id, files, {
         split: uploadSplit,
@@ -258,6 +333,13 @@ export function StudioDatasetsTab({
       if (fileInputRef.current) fileInputRef.current.value = "";
       if (folderInputRef.current) folderInputRef.current.value = "";
     }
+  };
+
+  const addPagesTo = (id: string, kind: "files" | "folder" = "files") => {
+    setDatasetId(id);
+    uploadIntoIdRef.current = id;
+    if (kind === "folder") folderInputRef.current?.click();
+    else fileInputRef.current?.click();
   };
 
   const onConvertPdfs = async () => {
@@ -296,6 +378,37 @@ export function StudioDatasetsTab({
       );
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not convert to YOLO.");
+      setMessage(null);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onExportCrops = async (opts: {
+    classLabels: string[];
+    targetName: string;
+    paddingFrac: number;
+    square: boolean;
+  }) => {
+    if (!datasetId) return;
+    setBusy(true);
+    setError(null);
+    setMessage(`Cropping ${opts.classLabels.join(", ")} into a new dataset…`);
+    try {
+      const created = await exportAnnotationCrops(datasetId, {
+        classLabels: opts.classLabels,
+        targetName: opts.targetName || undefined,
+        paddingFrac: opts.paddingFrac,
+        square: opts.square,
+      });
+      await refresh(created.id);
+      setMessage(
+        `Created “${created.name}” with ${created.crops_created ?? created.image_count} crop${
+          (created.crops_created ?? created.image_count) === 1 ? "" : "s"
+        }. Open Annotate to review, then Train.`,
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not crop annotations.");
       setMessage(null);
     } finally {
       setBusy(false);
@@ -380,57 +493,55 @@ export function StudioDatasetsTab({
 
   return (
     <WorkspaceShell
-      showSidebar
       hideTopBar
       allowNewProjectShortcut={false}
-      sidebar={sidebar}
-      statusText={
-        dataset
-          ? `${dataset.name} · ${dataset.train_count ?? 0} train · ${dataset.test_count ?? 0} test · ${dataset.labeled_count} labelled`
-          : "Upload folders for train / test"
-      }
+      activityRail={activityRail}
     >
       <div className="flex h-full min-h-0 flex-col bg-white">
         {error ? (
           <p className="border-b border-red-100 bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>
         ) : null}
         {message ? (
-          <p className="border-b border-slate-100 bg-slate-50 px-3 py-1.5 text-[11px] text-slate-600">
+          <p className="border-b border-slate-100 bg-slate-50 px-3 py-1.5 text-[13px] text-slate-600">
             {message}
           </p>
         ) : null}
 
         <div className="min-h-0 flex-1 overflow-y-auto p-4">
           <section className="card space-y-3">
-            <h2 className="text-sm font-semibold">Upload</h2>
-            <p className="text-xs text-slate-500">
-              Upload images and/or PDFs (optional LabelMe <code>.json</code>). Choose a dataset
-              purpose so labels and fine-tune bases match — layout analysis, wall detection, wall
-              segmentation, and so on.
-            </p>
-            {!datasetId ? (
-              <label className="flex max-w-md flex-col gap-1 text-xs font-medium text-slate-600">
-                Dataset purpose
-                <select
-                  className="rounded border border-slate-300 bg-white px-2 py-1.5 text-sm font-normal text-slate-800"
-                  value={datasetCategory}
-                  onChange={(e) => setDatasetCategory(e.target.value)}
-                >
-                  {categorySpecs.map((spec) => (
-                    <option key={spec.id} value={spec.id}>
-                      {spec.label} ({spec.task})
-                    </option>
-                  ))}
-                </select>
-                {selectedCategorySpec ? (
-                  <span className="font-normal text-[11px] text-slate-500">
-                    Default base: {selectedCategorySpec.default_base} · classes:{" "}
-                    {selectedCategorySpec.class_names.slice(0, 4).join(", ")}
-                    {selectedCategorySpec.class_names.length > 4 ? "…" : ""}
-                  </span>
-                ) : null}
-              </label>
-            ) : null}
+            <HeadingHint
+              title="Upload"
+              as="h2"
+              className="text-sm font-semibold text-slate-800"
+              hint="Select a dataset first, then add images or PDFs. PDFs rasterize to pages when Convert PDFs is on. Upload without a selection creates a new dataset."
+            />
+            <label className="flex max-w-md flex-col gap-1 text-xs font-medium text-slate-600">
+              Dataset purpose
+              <select
+                className="rounded border border-slate-300 bg-white px-2 py-1.5 text-sm font-normal text-slate-800"
+                value={datasetCategory}
+                disabled={busy}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  setDatasetCategory(next);
+                  if (datasetId) void onChangePurpose(datasetId, next);
+                }}
+              >
+                {categorySpecs.map((spec) => (
+                  <option key={spec.id} value={spec.id}>
+                    {spec.label} ({spec.task})
+                  </option>
+                ))}
+              </select>
+              {selectedCategorySpec ? (
+                <span className="font-normal text-[13px] text-slate-500">
+                  {datasetId ? "Updates the selected dataset. " : "Used when creating a dataset. "}
+                  Default base: {selectedCategorySpec.default_base} · classes:{" "}
+                  {selectedCategorySpec.class_names.slice(0, 4).join(", ")}
+                  {selectedCategorySpec.class_names.length > 4 ? "…" : ""}
+                </span>
+              ) : null}
+            </label>
             <div className="flex flex-wrap gap-3 text-xs">
               <label className="inline-flex items-center gap-1.5 text-slate-600">
                 <input
@@ -472,19 +583,25 @@ export function StudioDatasetsTab({
                   </option>
                 ))}
               </select>
-              <span className="font-normal text-[11px] text-slate-500">
+              <span className="font-normal text-[13px] text-slate-500">
                 Higher DPI = sharper labels, larger files. Used when converting PDFs.
               </span>
             </label>
             {datasetId ? (
-              <p className="text-[11px] text-slate-500">
-                Adding to{" "}
+              <p className="text-[13px] text-slate-500">
+                Next upload appends pages to{" "}
                 <span className="font-medium text-slate-700">
-                  {dataset?.name ?? "selected dataset"}
+                  {dataset?.name ?? "the selected dataset"}
                 </span>
-                . Clear selection below to create a new dataset on upload.
+                . PDFs become images when “Convert PDFs” is on. Use Add dataset only for a
+                separate collection.
               </p>
-            ) : null}
+            ) : (
+              <p className="text-[13px] text-slate-500">
+                No dataset selected — upload will create a new one. Select a dataset below to
+                add pages to it instead.
+              </p>
+            )}
             <div className="flex flex-wrap items-center gap-2">
               <input
                 ref={fileInputRef}
@@ -511,7 +628,11 @@ export function StudioDatasetsTab({
                 disabled={busy}
                 onClick={() => fileInputRef.current?.click()}
               >
-                {busy ? "Working…" : "Choose files"}
+                {busy
+                  ? "Working…"
+                  : datasetId
+                    ? "Add files to this dataset"
+                    : "Upload as new dataset"}
               </button>
               <button
                 type="button"
@@ -519,43 +640,114 @@ export function StudioDatasetsTab({
                 disabled={busy}
                 onClick={() => folderInputRef.current?.click()}
               >
-                Choose folder
+                {datasetId ? "Add folder to this dataset" : "Choose folder"}
               </button>
               {datasetId ? (
                 <button
                   type="button"
                   className="text-xs text-slate-600 hover:underline"
                   disabled={busy}
-                  onClick={() => setDatasetId("")}
+                  onClick={openCreateForm}
                 >
-                  New dataset on next upload
+                  Add another dataset
                 </button>
               ) : null}
             </div>
           </section>
 
           <section className="mt-6 space-y-2">
-            <div className="flex items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <h2 className="text-sm font-semibold">Your datasets</h2>
-              <label className="flex items-center gap-1.5 text-xs text-slate-600">
-                Active
-                <select
-                  className="max-w-[12rem] rounded border border-slate-300 bg-white px-1.5 py-1 text-xs"
-                  value={datasetId}
-                  onChange={(e) => setDatasetId(e.target.value)}
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  className="rounded border border-brand-300 bg-brand-50 px-2.5 py-1 text-xs font-medium text-brand-800 hover:bg-brand-100 disabled:opacity-40"
+                  disabled={busy}
+                  onClick={openCreateForm}
                 >
-                  <option value="">None (new on upload)</option>
-                  {datasets.map((item) => (
-                    <option key={item.id} value={item.id}>
-                      {item.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
+                  Add dataset
+                </button>
+                <label className="flex items-center gap-1.5 text-xs text-slate-600">
+                  Active
+                  <select
+                    className="max-w-[12rem] rounded border border-slate-300 bg-white px-1.5 py-1 text-xs"
+                    value={datasetId}
+                    onChange={(e) => {
+                      setDatasetId(e.target.value);
+                      uploadIntoIdRef.current = e.target.value;
+                    }}
+                  >
+                    <option value="">None (new on upload)</option>
+                    {datasets.map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
             </div>
-            {datasets.length === 0 ? (
-              <p className="text-sm text-slate-500">No datasets yet — upload a folder to start.</p>
-            ) : (
+            {showCreateForm ? (
+              <div className="rounded border border-dashed border-brand-400 bg-white p-3">
+                <p className="text-xs font-medium text-slate-800">New dataset</p>
+                <p className="mt-0.5 text-[13px] text-slate-500">
+                  Creates an empty dataset. Then upload pages into it, or annotate later.
+                </p>
+                <div className="mt-2 flex flex-wrap items-end gap-2">
+                  <label className="min-w-[12rem] flex-1 text-[13px] font-medium text-slate-600">
+                    Name
+                    <input
+                      type="text"
+                      className="mt-1 w-full rounded border border-slate-300 bg-white px-2 py-1.5 text-sm font-normal text-slate-800"
+                      value={newDatasetName}
+                      placeholder="North arrow crops"
+                      disabled={busy}
+                      onChange={(e) => setNewDatasetName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") void onCreateDataset();
+                        if (e.key === "Escape") setShowCreateForm(false);
+                      }}
+                    />
+                  </label>
+                  <label className="min-w-[12rem] flex-1 text-[13px] font-medium text-slate-600">
+                    Purpose
+                    <select
+                      className="mt-1 w-full rounded border border-slate-300 bg-white px-2 py-1.5 text-sm font-normal text-slate-800"
+                      value={newDatasetCategory}
+                      disabled={busy}
+                      onChange={(e) => setNewDatasetCategory(e.target.value)}
+                    >
+                      {categorySpecs.map((spec) => (
+                        <option key={spec.id} value={spec.id}>
+                          {spec.label} ({spec.task})
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <button
+                    type="button"
+                    className="btn-primary text-xs"
+                    disabled={busy}
+                    onClick={() => void onCreateDataset()}
+                  >
+                    {busy ? "Creating…" : "Create"}
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                    disabled={busy}
+                    onClick={() => setShowCreateForm(false)}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : null}
+            {datasets.length === 0 && !showCreateForm ? (
+              <p className="text-sm text-slate-500">
+                No datasets yet — use Add dataset, or upload a folder to start.
+              </p>
+            ) : datasets.length === 0 ? null : (
               <ul className="space-y-2">
                 {datasets.map((item) => (
                   <li
@@ -567,20 +759,48 @@ export function StudioDatasetsTab({
                     }
                   >
                     <div className="flex items-start justify-between gap-2">
-                      <button
-                        type="button"
-                        className="min-w-0 flex-1 text-left"
-                        onClick={() => setDatasetId(item.id)}
-                      >
-                        <p className="text-sm font-medium text-slate-900">{item.name}</p>
-                        <p className="text-[11px] text-slate-500">
-                          {item.category ? `${categoryLabel(item.category)} · ` : ""}
-                          {item.task} · {item.train_count ?? 0} train · {item.test_count ?? 0} test ·{" "}
+                      <div className="min-w-0 flex-1">
+                        <button
+                          type="button"
+                          className="min-w-0 text-left"
+                          onClick={() => {
+                            setDatasetId(item.id);
+                            uploadIntoIdRef.current = item.id;
+                          }}
+                        >
+                          <p className="text-sm font-medium text-slate-900">{item.name}</p>
+                        </button>
+                        <label className="mt-1 flex max-w-xs items-center gap-1.5 text-[13px] font-medium text-slate-600">
+                          Purpose
+                          <select
+                            className="min-w-0 flex-1 rounded border border-slate-300 bg-white px-1.5 py-1 text-[13px] font-normal text-slate-800"
+                            value={String(normalizeStudioCategory(item.category) ?? item.category ?? "")}
+                            disabled={busy}
+                            onChange={(e) => void onChangePurpose(item.id, e.target.value)}
+                          >
+                            {!item.category ? <option value="">Choose purpose…</option> : null}
+                            {categorySpecs.map((spec) => (
+                              <option key={spec.id} value={spec.id}>
+                                {spec.label} ({spec.task})
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <p className="mt-1 text-[13px] text-slate-500">
+                          {item.train_count ?? 0} train · {item.test_count ?? 0} test ·{" "}
                           {item.labeled_count} labelled
                           {item.ready ? " · ready" : ""}
                         </p>
-                      </button>
+                      </div>
                       <div className="flex shrink-0 flex-col items-end gap-1">
+                        <button
+                          type="button"
+                          className="text-xs font-medium text-brand-800 hover:underline disabled:opacity-40"
+                          disabled={busy}
+                          onClick={() => addPagesTo(item.id)}
+                        >
+                          Add pages
+                        </button>
                         <button
                           type="button"
                           className="text-xs text-brand-700 hover:underline"
@@ -616,6 +836,18 @@ export function StudioDatasetsTab({
                     </div>
                   </li>
                 ))}
+                {!showCreateForm ? (
+                  <li>
+                    <button
+                      type="button"
+                      className="w-full rounded border border-dashed border-slate-300 bg-white px-3 py-3 text-left text-sm font-medium text-brand-800 hover:border-brand-400 hover:bg-brand-50/40 disabled:opacity-40"
+                      disabled={busy}
+                      onClick={openCreateForm}
+                    >
+                      + Add dataset
+                    </button>
+                  </li>
+                ) : null}
               </ul>
             )}
           </section>
@@ -626,11 +858,19 @@ export function StudioDatasetsTab({
                 <div>
                   <h2 className="text-sm font-semibold">Files — {dataset.name}</h2>
                   <p className="text-xs text-slate-500">
-                    Remove pages or set train/test before fine-tuning. Annotate is for drawing
-                    labels.
+                    Add more images or PDFs to this dataset — they are not a new collection.
+                    Remove pages or set train/test before fine-tuning.
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-50 disabled:opacity-40"
+                    disabled={busy}
+                    onClick={() => addPagesTo(dataset.id)}
+                  >
+                    Add pages
+                  </button>
                   {pdfPageCount > 0 ? (
                     <button
                       type="button"
@@ -662,13 +902,22 @@ export function StudioDatasetsTab({
                 </div>
               </div>
 
+              {(dataset.labeled_count ?? 0) > 0 ? (
+                <CropExportPanel
+                  classNames={mergeAnnotateClasses(dataset.class_names)}
+                  defaultName={`${dataset.name} — crops`}
+                  busy={busy}
+                  onExportClass={(opts) => void onExportCrops(opts)}
+                />
+              ) : null}
+
               {yoloResult && yoloResult.dataset_id === dataset.id ? (
                 <div className="rounded border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700">
                   <p className="font-medium text-slate-900">
                     YOLO export · {yoloResult.images} images · {yoloResult.instances} instances ·{" "}
                     {yoloResult.train} train / {yoloResult.val} val
                   </p>
-                  <p className="mt-1 break-all text-[11px] text-slate-500">{yoloResult.path}</p>
+                  <p className="mt-1 break-all text-[13px] text-slate-500">{yoloResult.path}</p>
                   {yoloResult.issues.length > 0 ? (
                     <ul className="mt-2 list-disc space-y-1 pl-4 text-amber-800">
                       {yoloResult.issues.map((issue) => (
@@ -676,7 +925,7 @@ export function StudioDatasetsTab({
                       ))}
                     </ul>
                   ) : (
-                    <p className="mt-1 text-[11px] text-slate-500">
+                    <p className="mt-1 text-[13px] text-slate-500">
                       No LabelMe issues detected. Safe to fine-tune.
                     </p>
                   )}
@@ -691,7 +940,7 @@ export function StudioDatasetsTab({
 
               {sources.length === 0 ? (
                 <p className="rounded border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-center text-sm text-slate-500">
-                  No files yet. Upload a folder above.
+                  No files yet. Use Add pages on this dataset.
                 </p>
               ) : (
                 <ul className="space-y-3">
@@ -700,10 +949,10 @@ export function StudioDatasetsTab({
                       <div className="flex flex-wrap items-start justify-between gap-2 border-b border-slate-100 px-3 py-2">
                         <div className="min-w-0">
                           <p className="truncate text-sm font-medium text-slate-900">{source.name}</p>
-                          <p className="truncate text-[11px] text-slate-400" title={source.path}>
+                          <p className="truncate text-[13px] text-slate-400" title={source.path}>
                             {source.path}
                           </p>
-                          <p className="text-[11px] text-slate-500">
+                          <p className="text-[13px] text-slate-500">
                             {source.pages.length} page{source.pages.length === 1 ? "" : "s"} ·{" "}
                             {source.train} train · {source.test} test
                           </p>
@@ -732,7 +981,7 @@ export function StudioDatasetsTab({
                             </span>
                             <div className="flex flex-wrap items-center gap-2">
                               <select
-                                className="rounded border border-slate-300 bg-white px-1.5 py-0.5 text-[11px]"
+                                className="rounded border border-slate-300 bg-white px-1.5 py-0.5 text-[13px]"
                                 value={page.split || "train"}
                                 disabled={busy}
                                 onChange={(e) =>

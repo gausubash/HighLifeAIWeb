@@ -12,7 +12,7 @@ import yaml
 from app.schemas import ComplianceResultCategory, ComplianceResultSchema
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-DEFAULT_PACK = REPO_ROOT / "configs" / "policies" / "highlife_v1.yaml"
+DEFAULT_PACK = REPO_ROOT / "configs" / "policies" / "hooper_apartment_rules_v1.yaml"
 
 
 def resolve_policy_pack_path(explicit: str | None = None) -> Path:
@@ -115,6 +115,11 @@ def evaluate_policy(
     for rule in pack.get("rules") or []:
         code = str(rule.get("code") or "UNKNOWN")
         needs_scale = bool(rule.get("requires_scale"))
+        kind = str(rule.get("kind") or "")
+        if kind.startswith("apartment_") or kind == "communal_open_space":
+            # Apartment RDS rules run in the web Policy tab against extracted units.
+            continue
+
         if needs_scale and not scaled:
             results.append(
                 _row(

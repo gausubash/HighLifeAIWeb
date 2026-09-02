@@ -59,6 +59,52 @@ def _clip_norm_poly_to_tile(
     return out if len(out) >= 6 else None
 
 
+def _clip_norm_pose_to_tile(
+    coords: list[float],
+    *,
+    img_w: int,
+    img_h: int,
+    x0: int,
+    y0: int,
+    tile_w: int,
+    tile_h: int,
+    canvas: int,
+) -> list[float] | None:
+    box = _clip_norm_xywh_to_tile(
+        coords[:4],
+        img_w=img_w,
+        img_h=img_h,
+        x0=x0,
+        y0=y0,
+        tile_w=tile_w,
+        tile_h=tile_h,
+    )
+    if box is None:
+        return None
+    if tile_w != canvas or tile_h != canvas:
+        cx, cy, bw, bh = box
+        box = [
+            cx * tile_w / canvas,
+            cy * tile_h / canvas,
+            bw * tile_w / canvas,
+            bh * tile_h / canvas,
+        ]
+    out = list(box)
+    rest = coords[4:]
+    for i in range(0, len(rest) - 2, 3):
+        px = rest[i] * img_w
+        py = rest[i + 1] * img_h
+        vis = rest[i + 2]
+        nx = (px - x0) / max(tile_w, 1)
+        ny = (py - y0) / max(tile_h, 1)
+        if nx < 0 or nx > 1 or ny < 0 or ny > 1:
+            vis = 0.0
+        nx = min(1.0, max(0.0, nx)) * tile_w / canvas
+        ny = min(1.0, max(0.0, ny)) * tile_h / canvas
+        out.extend((nx, ny, vis))
+    return out
+
+
 def _clip_norm_xywh_to_tile(
     coords: list[float],
     *,
@@ -149,7 +195,18 @@ def expand_yolo_split_with_tiles(
                 if not parsed:
                     continue
                 class_id, coords = parsed
-                if task == "detect" or len(coords) == 4:
+                if task == "pose" or len(coords) >= 10:
+                    clipped = _clip_norm_pose_to_tile(
+                        coords,
+                        img_w=w,
+                        img_h=h,
+                        x0=tile.x0,
+                        y0=tile.y0,
+                        tile_w=tile.width,
+                        tile_h=tile.height,
+                        canvas=tile_size,
+                    )
+                elif task == "detect" or len(coords) == 4:
                     clipped = _clip_norm_xywh_to_tile(
                         coords,
                         img_w=w,

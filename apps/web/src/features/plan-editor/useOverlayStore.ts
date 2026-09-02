@@ -16,8 +16,20 @@ import {
 } from "./layoutRegionClasses";
 import { layoutEntityToRect, type LayoutRect, type ResizeHandle } from "./layoutRegionGeometry";
 import {
+  DEFAULT_COMPASS_KEYPOINT_VISIBLE,
+  offsetCompassKeypointsInAttributes,
+  type CompassKeypointName,
+  type CompassKeypointVisible,
+} from "@/lib/hierarchy/compassKeypoints";
+import { isNorthArrowEntity, placeCompassKeypointOnEntity } from "./compassKeypointAnnotate";
+import {
+  DEFAULT_OVERLAY_GROUP_VISIBLE,
+  type OverlayEntityGroup,
+} from "./overlayVisibility";
+import {
   DEFAULT_LAYER_SETTINGS,
   ENTITY_LAYER,
+  isPointerTool,
   translateGeometry,
   type LayerSettings,
   type OverlayEntity,
@@ -32,7 +44,7 @@ type PageSlice = {
   selectedIds: string[];
 };
 
-const EMPTY_SLICE: PageSlice = {
+export const EMPTY_OVERLAY_PAGE: PageSlice = {
   entities: [],
   past: [],
   future: [],
@@ -50,8 +62,21 @@ function pageKey(analysisId: string, pageNumber: number): string {
   return `${analysisId}:${pageNumber}`;
 }
 
+/** Keep first entity per id — prevents React duplicate-key errors from tiled detect streams. */
+export function dedupeOverlayEntities(entities: OverlayEntity[]): OverlayEntity[] {
+  const seen = new Set<string>();
+  const out: OverlayEntity[] = [];
+  for (const entity of entities) {
+    if (seen.has(entity.id)) continue;
+    seen.add(entity.id);
+    out.push(entity);
+  }
+  return out;
+}
+
 type Draft =
   | { tool: "rect"; start: Point; current: Point }
+  | { tool: "marquee"; start: Point; current: Point; additive: boolean }
   | { tool: "polyline" | "polygon" | "mask"; points: Point[]; current: Point | null }
   | { tool: "move"; ids: string[]; origin: Point; last: Point; originals: OverlayEntity[] }
   | {
@@ -59,6 +84,13 @@ type Draft =
       entityId: string;
       handle: ResizeHandle;
       startRect: LayoutRect;
+      original: OverlayEntity;
+    }
+  | {
+      tool: "move-keypoint";
+      entityId: string;
+      name: CompassKeypointName;
+      last: Point;
       original: OverlayEntity;
     };
 
@@ -89,20 +121,38 @@ interface OverlayStore {
   draft: Draft | null;
   hoverId: string | null;
   hiddenLabels: Record<string, boolean>;
+  /** Coarse show/hide for layout, walls, rooms, objects, units. */
+  groupVisible: Record<OverlayEntityGroup, boolean>;
+  /** Roboflow-style compass keypoint overlays (tip / base). */
+  compassKeypointVisible: CompassKeypointVisible;
+  toggleCompassKeypoint: (name: CompassKeypointName) => void;
+  setCompassKeypointVisible: (name: CompassKeypointName, visible: boolean) => void;
+  /** Studio: next click places this compass keypoint on the selected north arrow. */
+  compassPlace: CompassKeypointName | null;
+  setCompassPlace: (name: CompassKeypointName | null) => void;
+  placeCompassKeypoint: (pt: Point) => boolean;
+  moveCompassKeypointTo: (entityId: string, name: CompassKeypointName, x: number, y: number) => void;
+  finishKeypointMove: () => void;
   /** When set, rectangle drafts become a manual layout region of this type. */
   layoutDrawType: LayoutRegionKind | null;
+  layoutDrawLabel: string | null;
   setContext: (analysisId: string, pageNumber: number) => void;
   setTool: (tool: OverlayTool) => void;
   setEntityType: (type: PlanEntityType) => void;
   setLabelClass: (label: string) => void;
-  setLayoutDrawType: (type: LayoutRegionKind | null) => void;
+  setLayoutDrawType: (type: LayoutRegionKind | null, label?: string | null) => void;
   setHoverId: (id: string | null) => void;
   toggleLabelVisibility: (label: string) => void;
+  removeByLabel: (label: string) => void;
+  toggleOverlayGroup: (group: OverlayEntityGroup) => void;
+  setOverlayGroupVisible: (group: OverlayEntityGroup, visible: boolean) => void;
   setLayer: (id: OverlayLayerId, patch: Partial<LayerSettings>) => void;
   execute: (command: OverlayCommand) => void;
   undo: () => void;
   redo: () => void;
   select: (ids: string[], additive?: boolean) => void;
+  toggleSelect: (id: string) => void;
+  selectAll: () => void;
   clearSelection: () => void;
   setDraft: (draft: Draft | null) => void;
   commitDraft: () => void;
@@ -116,6 +166,11 @@ interface OverlayStore {
   finishResize: () => void;
   setModelPredictions: (
     entities: OverlayEntity[],
+    context?: { analysisId: string; pageNumber: number; replaceTypes?: OverlayEntity["type"][] },
+  ) => void;
+  upsertInferredUnitBoundaries: (
+    entities: OverlayEntity[],
+    labelPatches: Array<{ id: string; label: string; attributes?: Record<string, unknown> }>,
     context?: { analysisId: string; pageNumber: number },
   ) => void;
   loadPageEntities: (
@@ -138,13 +193,24 @@ export const useOverlayStore = create<OverlayStore>((set, get) => ({
   pageNumber: 1,
   pages: {},
   layers: { ...DEFAULT_LAYER_SETTINGS },
-  tool: "pan",
+  tool: "select",
   entityType: entityTypeForLabel(DEFAULT_LABEL_CLASS),
   labelClass: DEFAULT_LABEL_CLASS,
   draft: null,
   hoverId: null,
   hiddenLabels: {},
+  groupVisible: {
+    layout: DEFAULT_OVERLAY_GROUP_VISIBLE.layout,
+    walls: DEFAULT_OVERLAY_GROUP_VISIBLE.walls,
+    rooms: DEFAULT_OVERLAY_GROUP_VISIBLE.rooms,
+    openings: DEFAULT_OVERLAY_GROUP_VISIBLE.openings,
+    objects: DEFAULT_OVERLAY_GROUP_VISIBLE.objects,
+    units: DEFAULT_OVERLAY_GROUP_VISIBLE.units,
+  },
+  compassKeypointVisible: { ...DEFAULT_COMPASS_KEYPOINT_VISIBLE },
+  compassPlace: null,
   layoutDrawType: null,
+  layoutDrawLabel: null,
 
   setContext: (analysisId, pageNumber) =>
     set((s) => {
@@ -156,7 +222,8 @@ export const useOverlayStore = create<OverlayStore>((set, get) => ({
         draft: null,
         hoverId: null,
         layoutDrawType: null,
-        tool: s.tool === "pan" || s.tool === "select" ? s.tool : "pan",
+        layoutDrawLabel: null,
+        tool: isPointerTool(s.tool) ? s.tool : "select",
       };
     }),
 
@@ -164,16 +231,16 @@ export const useOverlayStore = create<OverlayStore>((set, get) => ({
     set((s) => ({
       tool,
       draft: null,
+      compassPlace: tool === "point" ? s.compassPlace : null,
       layoutDrawType: tool === "rect" ? s.layoutDrawType : null,
-      entityType:
-        tool === "pan" || tool === "select"
-          ? get().entityType
-          : entityTypeForLabel(get().labelClass),
+      layoutDrawLabel: tool === "rect" ? s.layoutDrawLabel : null,
+      entityType: isPointerTool(tool) ? get().entityType : entityTypeForLabel(get().labelClass),
     })),
 
-  setLayoutDrawType: (type) =>
+  setLayoutDrawType: (type, label) =>
     set({
       layoutDrawType: type,
+      layoutDrawLabel: type ? (label?.trim() || null) : null,
       tool: type ? "rect" : "select",
       draft: null,
     }),
@@ -189,6 +256,108 @@ export const useOverlayStore = create<OverlayStore>((set, get) => ({
     set((s) => ({
       hiddenLabels: { ...s.hiddenLabels, [label]: !s.hiddenLabels[label] },
     })),
+  removeByLabel: (label) => {
+    const s = get();
+    const key = pageKey(s.analysisId, s.pageNumber);
+    const slice = s.pages[key] ?? emptySlice();
+    const needle = label.trim().toLowerCase();
+    const toRemove = slice.entities.filter((e) => {
+      if (e.source !== "model" && e.source !== "inferred") return false;
+      return (e.label || e.type).trim().toLowerCase() === needle;
+    });
+    if (toRemove.length === 0) return;
+    get().execute({ type: "remove", entities: toRemove });
+  },
+  toggleOverlayGroup: (group) =>
+    set((s) => ({
+      groupVisible: { ...s.groupVisible, [group]: !s.groupVisible[group] },
+    })),
+  setOverlayGroupVisible: (group, visible) =>
+    set((s) => ({
+      groupVisible: { ...s.groupVisible, [group]: visible },
+    })),
+  toggleCompassKeypoint: (name) =>
+    set((s) => ({
+      compassKeypointVisible: {
+        ...s.compassKeypointVisible,
+        [name]: !s.compassKeypointVisible[name],
+      },
+    })),
+  setCompassKeypointVisible: (name, visible) =>
+    set((s) => ({
+      compassKeypointVisible: { ...s.compassKeypointVisible, [name]: visible },
+    })),
+  setCompassPlace: (name) =>
+    set({
+      compassPlace: name,
+      tool: name ? "point" : "select",
+      draft: null,
+    }),
+  placeCompassKeypoint: (pt) => {
+    const s = get();
+    const name = s.compassPlace;
+    if (!name) return false;
+    const key = pageKey(s.analysisId, s.pageNumber);
+    const slice = s.pages[key] ?? emptySlice();
+    const selected = slice.entities.find((entity) => slice.selectedIds.includes(entity.id));
+    const target =
+      (selected && isNorthArrowEntity(selected) ? selected : null) ??
+      [...slice.entities].reverse().find((entity) => isNorthArrowEntity(entity)) ??
+      selected ??
+      null;
+    if (!target) {
+      const created = placeCompassKeypointOnEntity(
+        makeLabeledEntity("North Arrow", {
+          kind: "rect",
+          x: pt.x - 16,
+          y: pt.y - 16,
+          width: 32,
+          height: 32,
+        }),
+        name,
+        pt,
+      );
+      get().execute({ type: "add", entity: created });
+      get().select([created.id]);
+      return true;
+    }
+    const after = placeCompassKeypointOnEntity(target, name, pt);
+    get().execute({ type: "update", id: target.id, before: target, after });
+    get().select([target.id]);
+    return true;
+  },
+  moveCompassKeypointTo: (entityId, name, x, y) =>
+    set((s) => {
+      const key = pageKey(s.analysisId, s.pageNumber);
+      const slice = s.pages[key] ?? emptySlice();
+      return {
+        pages: {
+          ...s.pages,
+          [key]: {
+            ...slice,
+            entities: slice.entities.map((entity) =>
+              entity.id === entityId
+                ? placeCompassKeypointOnEntity(entity, name, { x, y }, "visible", true)
+                : entity,
+            ),
+          },
+        },
+      };
+    }),
+  finishKeypointMove: () => {
+    const s = get();
+    const draft = s.draft;
+    if (draft?.tool !== "move-keypoint") {
+      set({ draft: null });
+      return;
+    }
+    const key = pageKey(s.analysisId, s.pageNumber);
+    const slice = s.pages[key] ?? emptySlice();
+    const after = slice.entities.find((entity) => entity.id === draft.entityId);
+    set({ draft: null });
+    if (!after || after === draft.original) return;
+    get().execute({ type: "update", id: draft.entityId, before: draft.original, after });
+  },
   setLayer: (id, patch) =>
     set((s) => ({
       layers: { ...s.layers, [id]: { ...s.layers[id], ...patch } },
@@ -268,6 +437,24 @@ export const useOverlayStore = create<OverlayStore>((set, get) => ({
       return { pages: { ...s.pages, [key]: { ...slice, selectedIds } } };
     }),
 
+  toggleSelect: (id) =>
+    set((s) => {
+      const key = pageKey(s.analysisId, s.pageNumber);
+      const slice = s.pages[key] ?? emptySlice();
+      const selectedIds = slice.selectedIds.includes(id)
+        ? slice.selectedIds.filter((item) => item !== id)
+        : [...slice.selectedIds, id];
+      return { pages: { ...s.pages, [key]: { ...slice, selectedIds } } };
+    }),
+
+  selectAll: () =>
+    set((s) => {
+      const key = pageKey(s.analysisId, s.pageNumber);
+      const slice = s.pages[key] ?? emptySlice();
+      const selectedIds = slice.entities.filter((e) => e.status !== "rejected").map((e) => e.id);
+      return { pages: { ...s.pages, [key]: { ...slice, selectedIds } } };
+    }),
+
   clearSelection: () =>
     set((s) => {
       const key = pageKey(s.analysisId, s.pageNumber);
@@ -281,6 +468,10 @@ export const useOverlayStore = create<OverlayStore>((set, get) => ({
     const s = get();
     const draft = s.draft;
     if (!draft) return;
+    if (draft.tool === "marquee" || draft.tool === "resize") {
+      set({ draft: null });
+      return;
+    }
     const ts = nowIso();
     if (draft.tool === "rect") {
       const x = Math.min(draft.start.x, draft.current.x);
@@ -295,14 +486,20 @@ export const useOverlayStore = create<OverlayStore>((set, get) => ({
       if (s.layoutDrawType) {
         const key = pageKey(s.analysisId, s.pageNumber);
         const slice = s.pages[key] ?? emptySlice();
-        const toRemove = slice.entities.filter(
-          (e) => e.type === s.layoutDrawType && e.source === "manual" && e.status !== "rejected",
-        );
+        const drawLabel = s.layoutDrawLabel?.trim() || undefined;
+        const drawName = (drawLabel ?? s.layoutDrawType).toLowerCase();
+        const toRemove = slice.entities.filter((e) => {
+          if (e.source !== "manual" || e.status === "rejected") return false;
+          if (s.layoutDrawType === "notes") {
+            return e.type === "notes" && e.label.trim().toLowerCase() === drawName;
+          }
+          return e.type === s.layoutDrawType;
+        });
         if (toRemove.length > 0) {
           get().execute({ type: "remove", entities: toRemove });
         }
-        const entity = makeLayoutRegionEntity(s.layoutDrawType, geometry, ts);
-        set({ draft: null, layoutDrawType: null, tool: "select" });
+        const entity = makeLayoutRegionEntity(s.layoutDrawType, geometry, ts, drawLabel);
+        set({ draft: null, layoutDrawType: null, layoutDrawLabel: null, tool: "select" });
         get().execute({ type: "add", entity });
         get().select([entity.id]);
         return;
@@ -363,7 +560,7 @@ export const useOverlayStore = create<OverlayStore>((set, get) => ({
           },
         };
       }
-      if (draft?.tool === "resize") {
+      if (draft?.tool === "resize" || draft?.tool === "move-keypoint") {
         const key = pageKey(s.analysisId, s.pageNumber);
         const slice = s.pages[key] ?? emptySlice();
         return {
@@ -440,7 +637,13 @@ export const useOverlayStore = create<OverlayStore>((set, get) => ({
           [key]: {
             ...slice,
             entities: slice.entities.map((e) =>
-              ids.has(e.id) ? { ...e, geometry: translateGeometry(e.geometry, dx, dy) } : e,
+              ids.has(e.id)
+                ? {
+                    ...e,
+                    geometry: translateGeometry(e.geometry, dx, dy),
+                    attributes: offsetCompassKeypointsInAttributes(e.attributes, dx, dy) ?? e.attributes,
+                  }
+                : e,
             ),
           },
         },
@@ -517,7 +720,12 @@ export const useOverlayStore = create<OverlayStore>((set, get) => ({
       const pageNumber = context?.pageNumber ?? s.pageNumber;
       const key = pageKey(analysisId, pageNumber);
       const slice = s.pages[key] ?? emptySlice();
-      const kept = slice.entities.filter((e) => e.source !== "model");
+      const replaceTypes = context?.replaceTypes;
+      const kept = slice.entities.filter((e) => {
+        if (e.source !== "model") return true;
+        if (!replaceTypes) return false;
+        return !replaceTypes.includes(e.type);
+      });
       return {
         analysisId,
         pageNumber,
@@ -525,12 +733,61 @@ export const useOverlayStore = create<OverlayStore>((set, get) => ({
           ...s.pages,
           [key]: {
             ...slice,
-            entities: [...kept, ...entities],
+            entities: dedupeOverlayEntities([...kept, ...entities]),
             selectedIds: [],
           },
         },
         tool: entities.length > 0 ? "select" : s.tool,
         draft: null,
+      };
+    }),
+
+  upsertInferredUnitBoundaries: (entities, labelPatches, context) =>
+    set((s) => {
+      const analysisId = context?.analysisId ?? s.analysisId;
+      const pageNumber = context?.pageNumber ?? s.pageNumber;
+      const key = pageKey(analysisId, pageNumber);
+      const slice = s.pages[key] ?? emptySlice();
+      const patchById = new Map(labelPatches.map((p) => [p.id, p]));
+      const kept = slice.entities.filter(
+        (e) => !(e.source === "inferred" && e.type === "unit_boundary"),
+      );
+      const patched = kept.map((e) => {
+        const patch = patchById.get(e.id);
+        let next = e;
+        if (patch) {
+          next = {
+            ...e,
+            label: patch.label,
+            attributes: { ...e.attributes, ...patch.attributes, label: patch.label },
+            updatedAt: nowIso(),
+          };
+        }
+        if ((next.type === "door" || next.type === "window") && !next.attributes.openingType) {
+          const openingType =
+            next.type === "window"
+              ? "window"
+              : String(next.label).trim().toLowerCase() === "main door"
+                ? "unit_entrance"
+                : "internal_room_door";
+          next = {
+            ...next,
+            attributes: { ...next.attributes, openingType },
+            updatedAt: nowIso(),
+          };
+        }
+        return next;
+      });
+      return {
+        analysisId,
+        pageNumber,
+        pages: {
+          ...s.pages,
+          [key]: {
+            ...slice,
+            entities: dedupeOverlayEntities([...patched, ...entities]),
+          },
+        },
       };
     }),
 
@@ -547,7 +804,7 @@ export const useOverlayStore = create<OverlayStore>((set, get) => ({
           ...s.pages,
           [key]: {
             ...slice,
-            entities,
+            entities: dedupeOverlayEntities(entities),
             selectedIds: [],
             past: [],
             future: [],
@@ -571,7 +828,7 @@ export const useOverlayStore = create<OverlayStore>((set, get) => ({
           ...s.pages,
           [key]: {
             ...slice,
-            entities: [...kept, ...entities],
+            entities: dedupeOverlayEntities([...kept, ...entities]),
             selectedIds: [],
           },
         },
@@ -592,7 +849,7 @@ export const useOverlayStore = create<OverlayStore>((set, get) => ({
 }));
 
 export function useActiveOverlayPage() {
-  return useOverlayStore((s) => s.pages[pageKey(s.analysisId, s.pageNumber)] ?? EMPTY_SLICE);
+  return useOverlayStore((s) => s.pages[pageKey(s.analysisId, s.pageNumber)] ?? EMPTY_OVERLAY_PAGE);
 }
 
 export { pageKey };
