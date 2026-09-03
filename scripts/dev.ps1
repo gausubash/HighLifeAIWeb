@@ -80,9 +80,60 @@ if (Test-Path $tfPy) {
 }
 $infEnv["SUPABASE_URL"] = "http://127.0.0.1:54321"
 
-Write-Host "Starting inference API on http://127.0.0.1:8000" -ForegroundColor Cyan
+function Test-TcpPort([string]$TargetHost, [int]$Port, [int]$TimeoutMs = 800) {
+    $client = New-Object System.Net.Sockets.TcpClient
+    try {
+        $iar = $client.BeginConnect($TargetHost, $Port, $null, $null)
+        if (-not $iar.AsyncWaitHandle.WaitOne($TimeoutMs, $false)) {
+            return $false
+        }
+        $client.EndConnect($iar) | Out-Null
+        return $true
+    } catch {
+        return $false
+    } finally {
+        $client.Close()
+    }
+}
+
+function Test-InferenceLive([string]$BaseUrl) {
+    foreach ($path in @("/live", "/health")) {
+        try {
+            $r = Invoke-WebRequest -Uri "$BaseUrl$path" -UseBasicParsing -TimeoutSec 5
+            if ($r.StatusCode -eq 200) { return $true }
+        } catch {
+            $code = $null
+            try { $code = [int]$_.Exception.Response.StatusCode } catch { }
+            if ($path -eq "/live" -and $code -eq 404) { return $true }
+        }
+    }
+    return $false
+}
+
 $started = @()
-$started += Start-VenvWindow -Title "HighLife inference :8000" -WorkingDirectory $InfRoot -Python $infPy -UvicornApp "app.api:app" -HostAddr "127.0.0.1" -Port 8000 -ExtraEnv $infEnv
+
+$tunnelPortOpen = Test-TcpPort "127.0.0.1" 8008
+$tunnelUp = $tunnelPortOpen -or (Test-InferenceLive "http://127.0.0.1:8008")
+if ($tunnelUp) {
+    Write-Host "RACE tunnel detected on :8008 — using remote GPU inference (skipping local :8000)" -ForegroundColor Green
+    Write-Host "Studio tiling and Detect go to http://127.0.0.1:8008  (keep npm run race:tunnel running)" -ForegroundColor DarkGray
+} else {
+    Write-Host "No RACE tunnel — starting local inference API on http://127.0.0.1:8000" -ForegroundColor Cyan
+    $started += Start-VenvWindow -Title "HighLife inference :8000" -WorkingDirectory $InfRoot -Python $infPy -UvicornApp "app.api:app" -HostAddr "127.0.0.1" -Port 8000 -ExtraEnv $infEnv
+    $ready = $false
+    for ($i = 0; $i -lt 40; $i++) {
+        if (Test-InferenceLive "http://127.0.0.1:8000") {
+            $ready = $true
+            break
+        }
+        Start-Sleep -Milliseconds 500
+    }
+    if ($ready) {
+        Write-Host "Local inference ready on http://127.0.0.1:8000" -ForegroundColor Green
+    } else {
+        Write-Host "Warning: local :8000 is not answering /live yet. Tiling will fail until uvicorn finishes starting." -ForegroundColor Yellow
+    }
+}
 
 if ($WithApi) {
     $apiPy = Get-VenvPython (Join-Path $ApiRoot ".venv") "Floor-plan API"

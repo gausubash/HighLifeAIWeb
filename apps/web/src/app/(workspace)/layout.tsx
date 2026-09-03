@@ -5,9 +5,11 @@ import { useEffect } from "react";
 import { AppContextMenu } from "@/components/shell/AppContextMenu";
 import { AppShell } from "@/components/shell/AppShell";
 import { AuthGate } from "@/lib/auth/AuthGate";
+import { prefetchInferenceBackend } from "@/lib/api/inferenceClient";
 
 export default function WorkspaceLayout({ children }: { children: ReactNode }) {
   useEffect(() => {
+    void prefetchInferenceBackend();
     const html = document.documentElement;
     const body = document.body;
     html.classList.add("h-full", "overflow-hidden");

@@ -28,13 +28,26 @@ if ($local8000) {
 
 Write-Host ""
 if ($tunneled) {
-    $color = if ($tunneled.device -eq "cuda") { "Green" } else { "Yellow" }
+    $cudaOk = $false
+    if ($tunneled.PSObject.Properties.Name -contains "cuda_available") {
+        $cudaOk = [bool]$tunneled.cuda_available
+    } else {
+        $cudaOk = ($tunneled.device -eq "cuda")
+    }
+    $color = if ($cudaOk) { "Green" } else { "Yellow" }
     Write-Host "Port $LocalPort (RACE tunnel — use this for GPU):" -ForegroundColor $color
     Write-Host "  run_mode=$($tunneled.run_mode)  device=$($tunneled.device)"
-    if ($tunneled.device -ne "cuda") {
-        Write-Host "  WARN: expected device=cuda on RACE. Fix on server:" -ForegroundColor Yellow
-        Write-Host "    ssh race `"grep -E '^(RUN_MODE|DEVICE)=' ~/HighLifeAIWeb/services/inference/.env`""
-        Write-Host "    ssh race `"sed -i 's/^DEVICE=.*/DEVICE=cuda/' ~/HighLifeAIWeb/services/inference/.env && ~/HighLifeAIWeb/scripts/race-services.sh restart`""
+    if ($tunneled.PSObject.Properties.Name -contains "cuda_available") {
+        Write-Host "  cuda_available=$($tunneled.cuda_available)"
+    }
+    if (-not $cudaOk) {
+        Write-Host "  WARN: GPU not active — inference runs on CPU (slow)." -ForegroundColor Yellow
+        Write-Host "  Fix PyTorch on RACE (driver 12.x needs cu124 wheels, not cu130):" -ForegroundColor Yellow
+        Write-Host "    npm run race:fix-gpu"
+        Write-Host "  Or on RACE:"
+        Write-Host "    source ~/HighLifeAIWeb/services/inference/.venv/bin/activate"
+        Write-Host "    pip install -U torch torchvision --index-url https://download.pytorch.org/whl/cu124 --force-reinstall"
+        Write-Host "    bash ~/HighLifeAIWeb/scripts/race-services.sh restart"
     }
 } else {
     Write-Host "Port ${LocalPort}: no response — start tunnel: npm run race:tunnel" -ForegroundColor Red

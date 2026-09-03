@@ -27,6 +27,7 @@ import {
 } from "@/lib/studio/categories";
 import type { MlDataset, MlModel, MlTrainingJob } from "@/lib/studio/types";
 import { classSwatch, hexToRgba } from "@/features/plan-editor/styles";
+import { cn } from "@/lib/utils";
 import { StudioAnnotateTab } from "./StudioAnnotateTab";
 import { StudioDatasetsTab } from "./StudioDatasetsTab";
 import { StudioActivityRail } from "./StudioActivityRail";
@@ -442,7 +443,7 @@ export function StudioPageClient() {
       setError(
         e instanceof Error
           ? e.message.includes("Failed to fetch")
-            ? "uvicorn is not running on :8000. Start the inference API first."
+            ? "Cannot reach the inference API. Keep npm run race:tunnel running for GPU (:8008), or wait for local :8000 from .\\scripts\\dev.ps1."
             : e.message
           : "Inference failed.",
       );

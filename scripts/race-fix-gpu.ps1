@@ -14,7 +14,7 @@ Invoke-RaceScp -Config $cfg -LocalPath $tempEnv -RemotePath "$remoteAbs/services
 Remove-Item -LiteralPath $tempEnv -Force -ErrorAction SilentlyContinue
 
 Write-Host "==> Run race-enable-gpu.sh on RACE"
-Invoke-RaceSsh -Config $cfg -RemoteCommand "chmod +x '$remoteAbs/scripts/race-enable-gpu.sh' '$remoteAbs/scripts/race-services.sh' && '$remoteAbs/scripts/race-enable-gpu.sh'"
+Invoke-RaceSsh -Config $cfg -RemoteCommand "sed -i 's/\r$//' '$remoteAbs/scripts/race-enable-gpu.sh' '$remoteAbs/scripts/race-services.sh' && bash '$remoteAbs/scripts/race-enable-gpu.sh'"
 
 Write-Host ""
 Write-Host "On laptop (tunnel on :8008):" -ForegroundColor Cyan

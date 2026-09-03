@@ -19,6 +19,13 @@ def missing_local_weights(monkeypatch: pytest.MonkeyPatch) -> None:
     get_settings.cache_clear()
 
 
+def test_live() -> None:
+    res = client.get("/live")
+    assert res.status_code == 200
+    assert res.json()["status"] == "ok"
+    assert res.json()["service"] == "inference"
+
+
 def test_health() -> None:
     res = client.get("/health")
     assert res.status_code == 200

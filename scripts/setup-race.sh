@@ -188,72 +188,9 @@ pick_python() {
 
 setup_gpu_venv() {
   local root="$1"
-  local inf="$root/services/inference"
-  local py venv
-
-  [[ -d "$inf" ]] || die "Missing $inf — run without --skip-clone or set REPO_DIR"
-
-  log "GPU Python environment ($inf/.venv)"
-  py="$(pick_python)"
-  echo "Using interpreter: $($py --version)"
-
-  venv="$inf/.venv"
-  if [[ ! -d "$venv" ]]; then
-    "$py" -m venv "$venv"
-  fi
-
-  # shellcheck disable=SC1091
-  source "$venv/bin/activate"
-  pip install -U pip wheel setuptools
-  pip install -r "$inf/requirements-gpu.txt"
-
-  if [[ ! -f "$inf/.env" ]]; then
-    cp "$inf/.env.example" "$inf/.env"
-    echo "Created $inf/.env from .env.example"
-  else
-    echo "Keeping existing $inf/.env"
-  fi
-
-  log "Patch RACE defaults in .env (non-destructive)"
-  python3 - <<'PY' "$inf/.env"
-import pathlib
-import re
-import sys
-
-path = pathlib.Path(sys.argv[1])
-text = path.read_text(encoding="utf-8")
-replacements = {
-    r"^RUN_MODE=.*": "RUN_MODE=real",
-    r"^DEVICE=.*": "DEVICE=auto",
-    r"^API_HOST=.*": "API_HOST=127.0.0.1",
-    r"^API_PORT=.*": "API_PORT=8000",
-}
-for pattern, value in replacements.items():
-    if re.search(pattern, text, flags=re.M):
-        text = re.sub(pattern, value, text, count=1, flags=re.M)
-    else:
-        text = text.rstrip() + f"\n{value}\n"
-path.write_text(text, encoding="utf-8")
-print(f"Updated {path} for RACE (RUN_MODE=real, DEVICE=auto)")
-PY
-
-  log "CUDA smoke test"
-  python - <<'PY'
-import torch
-print("torch", torch.__version__)
-print("cuda available", torch.cuda.is_available())
-if torch.cuda.is_available():
-    print("device", torch.cuda.get_device_name(0))
-    print("vram_gb", round(torch.cuda.get_device_properties(0).total_memory / 1e9, 1))
-else:
-    print("WARN: CUDA not visible — check nvidia-smi and NVIDIA drivers on RACE")
-PY
-
-  log "Prefetch core model weights (optional — may take a few minutes)"
-  (cd "$inf" && python scripts/prefetch_architect.py) || echo "WARN: prefetch_architect failed (retry later)" >&2
-  (cd "$inf" && python scripts/prefetch_layout.py) || echo "WARN: prefetch_layout failed (retry later)" >&2
-
-  deactivate || true
+  [[ -d "$root/services/inference" ]] || die "Missing $root/services/inference — run without --skip-clone or set REPO_DIR"
+  log "Unified GPU venv ($root/services/inference/.venv — Python 3.11, torch + paddle)"
+  REPO="$root" bash "$root/scripts/race-setup-venv.sh"
 }
 
 print_next_steps() {
@@ -331,7 +268,7 @@ main() {
     setup_gpu_venv "$root"
   fi
 
-  chmod +x "$root/scripts/race-services.sh" "$root/scripts/race-train.sh" "$root/scripts/race-enable-gpu.sh" 2>/dev/null || true
+  chmod +x "$root/scripts/race-services.sh" "$root/scripts/race-train.sh" "$root/scripts/race-enable-gpu.sh" "$root/scripts/race-setup-venv.sh" 2>/dev/null || true
   if [[ -f "$root/scripts/race-enable-gpu.sh" ]]; then
     REPO="$root" "$root/scripts/race-enable-gpu.sh" || true
   fi

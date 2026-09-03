@@ -226,6 +226,9 @@ export function WorkspaceShell({
   const inspectorNode = inspectorHasRail ? inspector : shellInspector;
   const hasInspectorContent = Boolean(inspector);
   const showInspector = inspectorOpen && hasInspectorContent;
+  // Project explorer lives in the same left chrome as the activity rail. Do not
+  // keep that column at 44px just because this page has no analysis inspector.
+  const showLeftExplorer = Boolean(inspectorOpen && inspectorNode && !activityRail);
   const showLeftPanel = Boolean(leftPanel) && leftPanelOpen;
   const effectiveShowSidebar = showSidebar && !activityRail;
 
@@ -246,7 +249,7 @@ export function WorkspaceShell({
     )
   ) : null;
 
-  const collapsedInspectorToggle = hasInspectorContent && !inspectorOpen ? (
+  const collapsedInspectorToggleRight = hasInspectorContent && !inspectorOpen ? (
     <button
       type="button"
       title={`Show ${inspectorTitle}`}
@@ -255,7 +258,7 @@ export function WorkspaceShell({
     >
       <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden>
         <path
-          d="M3.2 1.6 6.8 5 3.2 8.4"
+          d="M6.8 1.6 3.2 5l3.6 3.4"
           stroke="currentColor"
           strokeWidth="1.4"
           strokeLinecap="round"
@@ -265,6 +268,29 @@ export function WorkspaceShell({
     </button>
   ) : null;
 
+  const rightInspectorPanel =
+    activityRail && hasInspectorContent ? (
+      showInspector ? (
+        <>
+          <PanelResizeHandle
+            edge="left"
+            value={inspectorWidth}
+            onChange={setInspectorWidth}
+            min={INSPECTOR_WIDTH.min}
+            max={INSPECTOR_WIDTH.max}
+          />
+          <aside
+            className="hl-group flex h-full min-h-0 min-w-0 shrink-0 flex-col overflow-hidden"
+            style={{ width: inspectorWidth }}
+          >
+            {inspectorPanel}
+          </aside>
+        </>
+      ) : (
+        collapsedInspectorToggleRight
+      )
+    ) : null;
+
   return (
     <div className="hl-workbench flex h-full max-h-full min-h-0 flex-col overflow-hidden">
       <div className="hl-chrome shrink-0">
@@ -272,44 +298,23 @@ export function WorkspaceShell({
       </div>
       <div className="hl-chrome hl-workbench-columns hl-workbench-body">
         {activityRail ? (
-          <>
-            <aside
-              className="flex h-full min-h-0 min-w-0 shrink-0 flex-col overflow-hidden"
-              style={{ width: ACTIVITY_BAR_WIDTH }}
-            >
-              {activityRail}
-            </aside>
-            {showInspector ? (
-              <>
-                <aside
-                  className="flex h-full min-h-0 min-w-0 shrink-0 flex-col overflow-hidden"
-                  style={{ width: inspectorWidth }}
-                >
-                  {inspectorPanel}
-                </aside>
-                <PanelResizeHandle
-                  edge="right"
-                  value={inspectorWidth}
-                  onChange={setInspectorWidth}
-                  min={INSPECTOR_WIDTH.min}
-                  max={INSPECTOR_WIDTH.max}
-                />
-              </>
-            ) : (
-              collapsedInspectorToggle
-            )}
-          </>
+          <aside
+            className="flex h-full min-h-0 min-w-0 shrink-0 flex-col overflow-hidden"
+            style={{ width: ACTIVITY_BAR_WIDTH }}
+          >
+            {activityRail}
+          </aside>
         ) : (
           <>
             <aside
               className="flex h-full min-h-0 min-w-0 shrink-0 flex-col overflow-hidden"
               style={{
-                width: showInspector ? inspectorWidth : ACTIVITY_BAR_WIDTH,
+                width: showLeftExplorer ? inspectorWidth : ACTIVITY_BAR_WIDTH,
               }}
             >
               {inspectorNode}
             </aside>
-            {showInspector ? (
+            {showLeftExplorer ? (
               <PanelResizeHandle
                 edge="right"
                 value={inspectorWidth}
@@ -385,6 +390,8 @@ export function WorkspaceShell({
             </span>
           </footer>
         </div>
+
+        {rightInspectorPanel}
 
         {effectiveShowSidebar && sidebarOpen ? (
           <>

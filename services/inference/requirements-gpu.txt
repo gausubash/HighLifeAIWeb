@@ -1,4 +1,5 @@
 # GPU extras — install on Ubuntu GPU VM only
+# RACE unified venv: use requirements-race-gpu.txt (numpy<2 for Paddle) via scripts/race-setup-venv.sh
 -r requirements.txt
 torch>=2.5.0
 ultralytics>=8.3.0

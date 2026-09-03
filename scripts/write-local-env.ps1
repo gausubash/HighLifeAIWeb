@@ -63,7 +63,7 @@ $infEnv = Join-Path $Root "services\inference\.env"
 
 Set-DotEnvValue $webEnv "NEXT_PUBLIC_SUPABASE_URL" $map.API_URL
 Set-DotEnvValue $webEnv "NEXT_PUBLIC_SUPABASE_ANON_KEY" $map.ANON_KEY
-Set-DotEnvValue $webEnv "NEXT_PUBLIC_INFERENCE_API_URL" "http://127.0.0.1:8000"
+Set-DotEnvValue $webEnv "NEXT_PUBLIC_INFERENCE_API_URL" "auto"
 Set-DotEnvValue $infEnv "SUPABASE_URL" $map.API_URL
 Set-DotEnvValue $infEnv "SUPABASE_SERVICE_ROLE_KEY" $map.SERVICE_ROLE_KEY
 

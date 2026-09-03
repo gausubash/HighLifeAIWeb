@@ -5,7 +5,10 @@ from __future__ import annotations
 import logging
 from enum import Enum
 from functools import lru_cache
-from typing import Self
+try:
+    from typing import Self
+except ImportError:  # Python 3.10
+    from typing_extensions import Self
 
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -43,6 +46,25 @@ def resolve_device(device: Device) -> Device:
     if device == Device.CUDA:
         logger.warning("DEVICE=cuda but torch.cuda.is_available() is false — using cpu")
     return Device.CPU
+
+
+def runtime_torch_device(settings: "Settings | None" = None) -> str:
+    """PyTorch/Ultralytics runtime device: cuda when available, else cpu."""
+    settings = settings or get_settings()
+    if settings.device == Device.CPU:
+        return "cpu"
+    if torch_cuda_available():
+        return "cuda"
+    if settings.device == Device.CUDA:
+        logger.warning(
+            "DEVICE=cuda but torch.cuda.is_available() is false at runtime — using cpu"
+        )
+    return "cpu"
+
+
+def yolo_predict_device(settings: "Settings | None" = None) -> str | int:
+    """Ultralytics predict() device: 0 for GPU, 'cpu' otherwise."""
+    return 0 if runtime_torch_device(settings) == "cuda" else "cpu"
 
 
 class Settings(BaseSettings):

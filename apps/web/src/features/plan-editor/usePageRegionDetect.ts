@@ -306,7 +306,7 @@ export function usePageRegionDetect({
           message.includes("Load failed");
         setDetectError(
           offline
-            ? "Inference API is not running on :8000. Start uvicorn in services/inference."
+            ? "Cannot reach the inference API. Keep npm run race:tunnel running for GPU (:8008), or wait for local :8000 from .\\scripts\\dev.ps1."
             : message,
         );
         setProgress(null);
@@ -570,7 +570,7 @@ export function usePageRegionDetect({
         message.includes("Load failed");
       setDetectError(
         offline
-          ? "Inference API is not running on :8000. Start uvicorn in services/inference."
+          ? "Cannot reach the inference API. Keep npm run race:tunnel running for GPU (:8008), or wait for local :8000 from .\\scripts\\dev.ps1."
           : message,
       );
       setProgress(null);

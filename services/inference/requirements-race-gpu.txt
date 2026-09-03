@@ -1,0 +1,29 @@
+# RACE unified GPU venv (Python 3.11 only) — one .venv for API, worker, YOLO, MitUNet, PaddleOCR-VL.
+# numpy must stay <2 for PaddlePaddle (do not -r requirements.txt here).
+#
+# Install order on RACE (scripts/race-setup-venv.sh):
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
+#   pip install paddlepaddle-gpu==3.2.1 -i https://www.paddlepaddle.org.cn/packages/stable/cu124/
+#   pip install -r requirements-race-gpu.txt
+
+numpy>=1.26.4,<2
+pydantic>=2.10.0
+pydantic-settings>=2.7.0
+python-dotenv>=1.0.1
+shapely>=2.0.6
+Pillow>=11.1.0
+PyYAML>=6.0.2
+httpx>=0.28.0
+fastapi>=0.115.0
+uvicorn[standard]>=0.34.0
+python-multipart>=0.0.18
+pypdfium2>=4.30.0
+typing-extensions>=4.12.0
+
+ultralytics>=8.3.0
+opencv-python-headless>=4.10.0
+segmentation-models-pytorch>=0.5.0
+pdf2image>=1.17.0
+supabase>=2.11.0
+
+paddleocr[doc-parser]>=3.4.0

@@ -19,7 +19,7 @@ import httpx
 import numpy as np
 from PIL import Image
 
-from app.config import Settings, get_settings
+from app.config import Settings, get_settings, yolo_predict_device
 from app.yolo.classes import display_label, entity_type_for, opening_type_for, room_type_for
 from app.yolo.compass_keypoints import attach_keypoints, parse_prediction_keypoints
 
@@ -257,7 +257,7 @@ def detect_roboflow_local(
     from app.yolo.predict import regions_from_ultralytics
 
     model = _get_local_model(weights)
-    device = (settings.device.value if hasattr(settings.device, "value") else str(settings.device)) or "cpu"
+    device = yolo_predict_device(settings)
     imgsz = 640
     conf = float(settings.roboflow_conf or 0.25)
     preds = model.predict(source=rgb, imgsz=imgsz, conf=conf, device=device, verbose=False)

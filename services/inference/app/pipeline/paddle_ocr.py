@@ -30,6 +30,9 @@ from app.pipeline.scale_converter import (
 logger = logging.getLogger(__name__)
 
 INFERENCE_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_MAIN_VENV_PYTHON = INFERENCE_ROOT / (
+    ".venv/Scripts/python.exe" if os.name == "nt" else ".venv/bin/python"
+)
 DEFAULT_OCR_VENV_PYTHON = INFERENCE_ROOT / (
     ".venv-ocr/Scripts/python.exe" if os.name == "nt" else ".venv-ocr/bin/python"
 )
@@ -171,6 +174,9 @@ def resolve_paddle_python(settings: Settings | None = None) -> Path | None:
     candidates: list[Path] = []
     if configured:
         candidates.append(Path(configured))
+    # RACE uses one .venv for inference + Paddle; Windows dev often keeps .venv-ocr separate.
+    if os.name != "nt":
+        candidates.append(DEFAULT_MAIN_VENV_PYTHON)
     candidates.append(DEFAULT_OCR_VENV_PYTHON)
     if tf_py:
         candidates.append(Path(tf_py))

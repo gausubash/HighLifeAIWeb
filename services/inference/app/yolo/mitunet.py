@@ -12,7 +12,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-from app.config import Settings, get_settings
+from app.config import Settings, get_settings, runtime_torch_device
 
 MITUNET_WALL_URL = (
     "https://media.githubusercontent.com/media/aliasstudio/mitunet/master/"
@@ -181,7 +181,7 @@ def get_mitunet_model(settings: Settings | None = None):
     raw = torch.load(path, map_location="cpu", weights_only=False)
     model.load_state_dict(_unwrap_state_dict(raw))
     model.eval()
-    device = settings.device.value
+    device = runtime_torch_device(settings)
     model.to(device)
     _model = model
     _model_path = key
@@ -201,7 +201,7 @@ def predict_wall_mask(rgb: np.ndarray, settings: Settings | None = None) -> np.n
     array = canvas.astype(np.float32) / 255.0
     array = (array - IMAGENET_MEAN) / IMAGENET_STD
     tensor = torch.from_numpy(np.transpose(array, (2, 0, 1))).unsqueeze(0)
-    tensor = tensor.to(settings.device.value)
+    tensor = tensor.to(runtime_torch_device(settings))
     with torch.no_grad():
         logits = model(tensor)
         probs = torch.sigmoid(logits)[0, 0].detach().cpu().numpy()

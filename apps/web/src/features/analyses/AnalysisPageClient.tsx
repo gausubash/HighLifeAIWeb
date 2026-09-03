@@ -1516,7 +1516,7 @@ export function AnalysisPageClient({ projectId, analysisId }: AnalysisPageClient
         }
         const message = e instanceof Error ? e.message : "OCR failed";
         const friendly = message.includes("Failed to fetch")
-          ? "Inference API is not running on :8000 (or OCR is not enabled)."
+          ? "Cannot reach the inference API. Keep npm run race:tunnel running for GPU (:8008), or wait for local :8000 from .\\scripts\\dev.ps1."
           : message;
         if (kind === "title_block" || kind === "page" || kind === "both") {
           setTitleBlockOcrError(friendly);

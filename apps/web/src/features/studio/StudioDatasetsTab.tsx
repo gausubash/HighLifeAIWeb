@@ -17,6 +17,7 @@ import {
   createDataset,
   deleteDataset,
   deleteDatasetPage,
+  deleteDatasetTiles,
   exportAnnotationCrops,
   getDataset,
   listBaseModels,
@@ -29,6 +30,7 @@ import {
   type YoloConvertResult,
 } from "@/lib/studio/studioClient";
 import type { MlDataset, StudioPage } from "@/lib/studio/types";
+import { isStudioTilePage } from "@/lib/studio/types";
 
 interface StudioDatasetsTabProps {
   activityRail?: ReactNode;
@@ -85,9 +87,11 @@ export function StudioDatasetsTab({
   );
 
   const pages = dataset?.pages ?? [];
+  const sourcePages = useMemo(() => pages.filter((page) => !isStudioTilePage(page)), [pages]);
+  const tilePages = useMemo(() => pages.filter(isStudioTilePage), [pages]);
   const pdfPageCount = useMemo(
-    () => pages.filter((page) => page.kind === "pdf").length,
-    [pages],
+    () => sourcePages.filter((page) => page.kind === "pdf").length,
+    [sourcePages],
   );
   const sources = useMemo(() => {
     const groups: {
@@ -98,7 +102,7 @@ export function StudioDatasetsTab({
       test: number;
     }[] = [];
     const seen = new Map<string, number>();
-    pages.forEach((item) => {
+    sourcePages.forEach((item) => {
       const key = item.source_path || item.source_name || "Untitled";
       let groupIndex = seen.get(key);
       if (groupIndex === undefined) {
@@ -117,7 +121,22 @@ export function StudioDatasetsTab({
       else groups[groupIndex].train += 1;
     });
     return groups;
-  }, [pages]);
+  }, [sourcePages]);
+  const datasetGroups = useMemo(() => {
+    const groups: { key: string; label: string; items: MlDataset[] }[] = [];
+    const seen = new Map<string, number>();
+    for (const item of datasets) {
+      const key = String(normalizeStudioCategory(item.category) ?? item.category ?? "uncategorized");
+      let index = seen.get(key);
+      if (index === undefined) {
+        index = groups.length;
+        seen.set(key, index);
+        groups.push({ key, label: categoryLabel(item.category), items: [] });
+      }
+      groups[index].items.push(item);
+    }
+    return groups;
+  }, [datasets]);
 
   const refresh = useCallback(
     async (selectId?: string) => {
@@ -262,6 +281,55 @@ export function StudioDatasetsTab({
       await refresh("");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not delete dataset.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onDeleteTiles = async (id: string, label: string) => {
+    const count = (id === datasetId ? tilePages : (datasets.find((d) => d.id === id)?.pages ?? []).filter(isStudioTilePage)).length;
+    if (
+      !window.confirm(
+        count > 0
+          ? `Remove all ${count} training tile${count === 1 ? "" : "s"} from “${label}”? Source pages stay.`
+          : `Remove all training tiles from “${label}”? Source pages stay.`,
+      )
+    ) {
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const next = await deleteDatasetTiles(id);
+      if (id === datasetId) setDataset(next);
+      await refresh(id);
+      setMessage(`Removed ${next.tiles_removed ?? count} tile${(next.tiles_removed ?? count) === 1 ? "" : "s"} from “${label}”.`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not remove tiles.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onDeleteDatasetGroup = async (label: string, items: MlDataset[]) => {
+    if (
+      !window.confirm(
+        `Delete all ${items.length} dataset${items.length === 1 ? "" : "s"} in “${label}”? This removes each studio copy.`,
+      )
+    ) {
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      for (const item of items) {
+        await deleteDataset(item.id);
+      }
+      setMessage(`Deleted ${items.length} dataset${items.length === 1 ? "" : "s"} in “${label}”.`);
+      await refresh("");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not delete dataset group.");
+      await refresh(datasetId);
     } finally {
       setBusy(false);
     }
@@ -748,8 +816,26 @@ export function StudioDatasetsTab({
                 No datasets yet — use Add dataset, or upload a folder to start.
               </p>
             ) : datasets.length === 0 ? null : (
-              <ul className="space-y-2">
-                {datasets.map((item) => (
+              <div className="space-y-4">
+                {datasetGroups.map((group) => (
+                  <section key={group.key} className="space-y-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                        {group.label} · {group.items.length}
+                      </p>
+                      <button
+                        type="button"
+                        className="text-xs text-red-700 hover:underline disabled:opacity-40"
+                        disabled={busy}
+                        onClick={() => void onDeleteDatasetGroup(group.label, group.items)}
+                      >
+                        Delete group
+                      </button>
+                    </div>
+                    <ul className="space-y-2">
+                      {group.items.map((item) => {
+                        const tiles = (item.pages ?? []).filter(isStudioTilePage).length;
+                        return (
                   <li
                     key={item.id}
                     className={
@@ -789,6 +875,7 @@ export function StudioDatasetsTab({
                         <p className="mt-1 text-[13px] text-slate-500">
                           {item.train_count ?? 0} train · {item.test_count ?? 0} test ·{" "}
                           {item.labeled_count} labelled
+                          {tiles > 0 ? ` · ${tiles} tile${tiles === 1 ? "" : "s"}` : ""}
                           {item.ready ? " · ready" : ""}
                         </p>
                       </div>
@@ -824,20 +911,33 @@ export function StudioDatasetsTab({
                             Train
                           </button>
                         ) : null}
+                        {tiles > 0 ? (
+                          <button
+                            type="button"
+                            className="text-xs text-red-700 hover:underline disabled:opacity-40"
+                            disabled={busy}
+                            onClick={() => void onDeleteTiles(item.id, item.name)}
+                          >
+                            Delete tiles
+                          </button>
+                        ) : null}
                         <button
                           type="button"
                           className="text-xs text-red-700 hover:underline disabled:opacity-40"
                           disabled={busy}
                           onClick={() => void onDeleteDataset(item.id, item.name)}
                         >
-                          Delete
+                          Delete dataset
                         </button>
                       </div>
                     </div>
                   </li>
+                        );
+                      })}
+                    </ul>
+                  </section>
                 ))}
                 {!showCreateForm ? (
-                  <li>
                     <button
                       type="button"
                       className="w-full rounded border border-dashed border-slate-300 bg-white px-3 py-3 text-left text-sm font-medium text-brand-800 hover:border-brand-400 hover:bg-brand-50/40 disabled:opacity-40"
@@ -846,9 +946,8 @@ export function StudioDatasetsTab({
                     >
                       + Add dataset
                     </button>
-                  </li>
                 ) : null}
-              </ul>
+              </div>
             )}
           </section>
 
@@ -858,11 +957,29 @@ export function StudioDatasetsTab({
                 <div>
                   <h2 className="text-sm font-semibold">Files — {dataset.name}</h2>
                   <p className="text-xs text-slate-500">
-                    Add more images or PDFs to this dataset — they are not a new collection.
-                    Remove pages or set train/test before fine-tuning.
+                    Source pages and training tiles are grouped separately. Remove tiles or the
+                    whole dataset without deleting one file at a time.
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
+                  {tilePages.length > 0 ? (
+                    <button
+                      type="button"
+                      className="rounded border border-red-200 bg-white px-3 py-1.5 text-xs font-medium text-red-800 hover:bg-red-50 disabled:opacity-40"
+                      disabled={busy}
+                      onClick={() => void onDeleteTiles(dataset.id, dataset.name)}
+                    >
+                      Remove all tiles ({tilePages.length})
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    className="rounded border border-red-200 bg-white px-3 py-1.5 text-xs font-medium text-red-800 hover:bg-red-50 disabled:opacity-40"
+                    disabled={busy}
+                    onClick={() => void onDeleteDataset(dataset.id, dataset.name)}
+                  >
+                    Delete dataset
+                  </button>
                   <button
                     type="button"
                     className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-50 disabled:opacity-40"
@@ -938,12 +1055,33 @@ export function StudioDatasetsTab({
                 </div>
               ) : null}
 
-              {sources.length === 0 ? (
+              {sources.length === 0 && tilePages.length === 0 ? (
                 <p className="rounded border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-center text-sm text-slate-500">
                   No files yet. Use Add pages on this dataset.
                 </p>
               ) : (
                 <ul className="space-y-3">
+                  {tilePages.length > 0 ? (
+                    <li className="rounded border border-amber-200 bg-amber-50/50">
+                      <div className="flex flex-wrap items-start justify-between gap-2 border-b border-amber-100 px-3 py-2">
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-slate-900">Training tiles</p>
+                          <p className="text-[13px] text-slate-500">
+                            {tilePages.length} tile{tilePages.length === 1 ? "" : "s"} generated
+                            from source pages
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          className="shrink-0 text-xs text-red-700 hover:underline disabled:opacity-40"
+                          disabled={busy}
+                          onClick={() => void onDeleteTiles(dataset.id, dataset.name)}
+                        >
+                          Remove all tiles
+                        </button>
+                      </div>
+                    </li>
+                  ) : null}
                   {sources.map((source) => (
                     <li key={source.path} className="rounded border border-slate-200">
                       <div className="flex flex-wrap items-start justify-between gap-2 border-b border-slate-100 px-3 py-2">

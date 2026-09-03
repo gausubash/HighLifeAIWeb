@@ -1,5 +1,5 @@
 import type { AnalysisResult } from "@highlife/shared-types";
-import { getInferenceApiBaseUrl } from "./inferenceClient";
+import { inferenceFetch } from "./inferenceClient";
 import { snakeToCamelDeep } from "./snakeCamel";
 
 export type AnalyzePolicyPayload = {
@@ -29,7 +29,7 @@ export async function requestPolicyAnalyze(
   body: AnalyzePolicyPayload,
   signal?: AbortSignal,
 ): Promise<{ ok: boolean; result: AnalysisResult; sceneGraph?: Record<string, unknown> }> {
-  const res = await fetch(`${getInferenceApiBaseUrl()}/v1/analyze`, {
+  const res = await inferenceFetch("/v1/analyze", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),

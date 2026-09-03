@@ -5,11 +5,13 @@ import { WorkspaceShell } from "@/components/shell/WorkspaceShell";
 import { HoverHint } from "@/components/ui/HoverHint";
 import {
   createDatasetTiles,
+  deleteDatasetTiles,
   getDataset,
   listDatasets,
   studioPageImageUrl,
 } from "@/lib/studio/studioClient";
 import type { MlDataset, StudioPage } from "@/lib/studio/types";
+import { isStudioTilePage } from "@/lib/studio/types";
 
 interface StudioTilesTabProps {
   activityRail?: ReactNode;
@@ -18,11 +20,16 @@ interface StudioTilesTabProps {
   onOpenTrain?: (datasetId: string) => void;
 }
 
-const TILE_SIZE_OPTIONS = [512, 640, 768, 1024] as const;
-
-function isTilePage(page: StudioPage): boolean {
-  return (page.kind || "") === "tile" || /_tile\d+/i.test(page.source_name || "");
+function clampTileSize(value: number): number {
+  if (!Number.isFinite(value)) return 640;
+  return Math.min(4096, Math.max(64, Math.round(value)));
 }
+
+function clampOverlapFraction(value: number): number {
+  if (!Number.isFinite(value)) return 0.2;
+  return Math.min(0.9, Math.max(0, value));
+}
+
 
 function TilePreview({
   datasetId,
@@ -85,7 +92,7 @@ export function StudioTilesTab({
   const [filter, setFilter] = useState<"all" | "labeled" | "unlabeled">("all");
 
   const tiles = useMemo(() => {
-    const pages = (dataset?.pages ?? []).filter(isTilePage);
+    const pages = (dataset?.pages ?? []).filter(isStudioTilePage);
     if (filter === "labeled") return pages.filter((p) => p.labeled);
     if (filter === "unlabeled") return pages.filter((p) => !p.labeled);
     return pages;
@@ -200,10 +207,38 @@ export function StudioTilesTab({
               ? `No tiles created — ${skipped} page(s) drawing area was smaller than the tile gate.`
               : "No tiles created. Convert PDFs to images and annotate first.",
       );
-      const tilePages = (next.pages ?? []).filter(isTilePage);
+      const tilePages = (next.pages ?? []).filter(isStudioTilePage);
       if (tilePages[0]) setSelectedId(tilePages[0].id);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not create tiles.");
+      setMessage(null);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onDeleteAll = async () => {
+    if (!datasetId || !dataset) return;
+    const count = (dataset.pages ?? []).filter(isStudioTilePage).length;
+    if (
+      !window.confirm(
+        count > 0
+          ? `Remove all ${count} training tile${count === 1 ? "" : "s"} from “${dataset.name}”? Source pages stay.`
+          : `Remove all training tiles from “${dataset.name}”?`,
+      )
+    ) {
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const next = await deleteDatasetTiles(datasetId);
+      setDataset(next);
+      setSelectedId(null);
+      await refresh(datasetId);
+      setMessage(`Removed ${next.tiles_removed ?? count} tile${(next.tiles_removed ?? count) === 1 ? "" : "s"}.`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not remove tiles.");
       setMessage(null);
     } finally {
       setBusy(false);
@@ -244,32 +279,34 @@ export function StudioTilesTab({
             </label>
             <label className="block text-xs font-medium text-slate-600">
               Tile size
-              <select
-                className="mt-1 block rounded border border-slate-300 bg-white px-2 py-1.5 text-sm"
+              <input
+                type="number"
+                min={64}
+                max={4096}
+                step={32}
+                className="mt-1 block min-w-[7rem] w-[7rem] rounded border border-slate-300 bg-white px-2 py-1.5 text-sm tabular-nums"
                 value={tileSize}
                 disabled={busy}
-                onChange={(e) => setTileSize(Number(e.target.value))}
-              >
-                {TILE_SIZE_OPTIONS.map((size) => (
-                  <option key={size} value={size}>
-                    {size}px
-                  </option>
-                ))}
-              </select>
+                onChange={(e) => setTileSize(clampTileSize(Number(e.target.value)))}
+              />
             </label>
             <label className="block text-xs font-medium text-slate-600">
               Overlap
-              <select
-                className="mt-1 block rounded border border-slate-300 bg-white px-2 py-1.5 text-sm"
-                value={overlap}
-                disabled={busy}
-                onChange={(e) => setOverlap(Number(e.target.value))}
-              >
-                <option value={0}>0%</option>
-                <option value={0.1}>10%</option>
-                <option value={0.2}>20%</option>
-                <option value={0.3}>30%</option>
-              </select>
+              <div className="mt-1 flex items-center gap-1">
+                <input
+                  type="number"
+                  min={0}
+                  max={90}
+                  step={1}
+                  className="block min-w-[5.5rem] w-[5.5rem] rounded border border-slate-300 bg-white px-2 py-1.5 text-sm tabular-nums"
+                  value={Math.round(overlap * 100)}
+                  disabled={busy}
+                  onChange={(e) =>
+                    setOverlap(clampOverlapFraction(Number(e.target.value) / 100))
+                  }
+                />
+                <span className="text-sm text-slate-500">%</span>
+              </div>
             </label>
             <label className="flex items-center gap-1.5 pb-2 text-xs text-slate-600">
               <input
@@ -305,6 +342,14 @@ export function StudioTilesTab({
               onClick={() => void onGenerate()}
             >
               {busy ? "Generating…" : "Generate tiles"}
+            </button>
+            <button
+              type="button"
+              className="rounded border border-red-200 bg-white px-3 py-1.5 text-xs font-medium text-red-800 hover:bg-red-50 disabled:opacity-40"
+              disabled={busy || !datasetId || (dataset?.pages ?? []).filter(isStudioTilePage).length === 0}
+              onClick={() => void onDeleteAll()}
+            >
+              Delete all tiles
             </button>
             {datasetId ? (
               <>

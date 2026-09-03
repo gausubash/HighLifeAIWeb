@@ -28,6 +28,10 @@ export type StudioPage = {
   converted_from_pdf?: boolean;
 };
 
+export function isStudioTilePage(page: Pick<StudioPage, "kind" | "source_name">): boolean {
+  return (page.kind || "") === "tile" || /_tile\d+/i.test(page.source_name || "");
+}
+
 export type MlDataset = {
   id: string;
   name: string;
@@ -49,6 +53,7 @@ export type MlDataset = {
   converted_count?: number;
   pdf_page_count?: number;
   image_page_count?: number;
+  tiles_removed?: number;
 };
 
 export type MlTrainingJob = {

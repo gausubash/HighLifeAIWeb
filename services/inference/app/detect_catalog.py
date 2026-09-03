@@ -9,7 +9,7 @@ from __future__ import annotations
 from app.config import Settings, get_settings
 from app.yolo.mitunet import mitunet_ready
 from app.yolo.predict import room_yolo_ready, yolo_ready
-from app.studio.local_store import list_models, model_weights_path
+from app.studio.local_store import StudioStoreError, list_models, model_weights_path
 from app.studio.model_catalog import (
     CATEGORY_LAYOUT,
     CATEGORY_OBJECT_DETECT,
@@ -245,8 +245,11 @@ def list_detect_models(settings: Settings | None = None) -> list[dict[str, objec
         model_id = str(model.get("id") or "")
         if not model_id:
             continue
-        weights = model_weights_path(model_id)
-        ready = weights.is_file()
+        try:
+            weights = model_weights_path(model_id)
+            ready = weights.is_file()
+        except StudioStoreError:
+            ready = False
         category = normalize_category(str(model.get("category") or "") or None)
         items.append(
             {

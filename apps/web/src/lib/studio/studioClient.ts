@@ -1,15 +1,23 @@
 "use client";
 
-import { getInferenceApiBaseUrl } from "@/lib/api/inferenceClient";
+import { getInferenceApiBaseUrl, inferenceFetch } from "@/lib/api/inferenceClient";
 import type { StudioDatasetCategorySpec } from "./categories";
-import type { MlDataset, MlModel, MlTrainingJob, StudioPage, StudioTask, StudioModelCategory } from "./types";
+import {
+  isStudioTilePage,
+  type MlDataset,
+  type MlModel,
+  type MlTrainingJob,
+  type StudioPage,
+  type StudioTask,
+  type StudioModelCategory,
+} from "./types";
 
 const OFFLINE =
-  "Cannot reach the local Studio API on :8000. Start uvicorn in services/inference — datasets and tiles are stored on this PC under data/studio (not Supabase).";
+  "Cannot reach the inference API. Keep npm run race:tunnel running for GPU (:8008), or use local :8000 from .\\scripts\\dev.ps1 when no tunnel is up.";
 
 async function studioFetch(path: string, init?: RequestInit): Promise<Response> {
   try {
-    return await fetch(`${getInferenceApiBaseUrl()}${path}`, init);
+    return await inferenceFetch(path, init);
   } catch {
     throw new Error(OFFLINE);
   }
@@ -264,6 +272,20 @@ export async function deleteDatasetPage(datasetId: string, pageId: string): Prom
   return readJson<MlDataset>(
     await studioFetch(`/v1/studio/datasets/${datasetId}/pages/${pageId}`, { method: "DELETE" }),
   );
+}
+
+export async function deleteDatasetTiles(datasetId: string): Promise<MlDataset> {
+  const res = await studioFetch(`/v1/studio/datasets/${datasetId}/tiles`, { method: "DELETE" });
+  if (res.status === 404) {
+    const current = await getDataset(datasetId);
+    const tiles = (current.pages ?? []).filter(isStudioTilePage);
+    let next = current;
+    for (const page of tiles) {
+      next = await deleteDatasetPage(datasetId, page.id);
+    }
+    return { ...next, tiles_removed: tiles.length };
+  }
+  return readJson<MlDataset>(res);
 }
 
 export async function setDatasetPageSplit(

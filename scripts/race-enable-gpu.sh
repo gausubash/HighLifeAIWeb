@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Force GPU inference settings on RACE and restart services.
-# Run on RACE: ~/HighLifeAIWeb/scripts/race-enable-gpu.sh
+# Run on RACE: bash ~/HighLifeAIWeb/scripts/race-enable-gpu.sh
 # Or from laptop: npm run race:fix-gpu
 set -euo pipefail
 
@@ -36,23 +36,41 @@ grep -E '^(RUN_MODE|DEVICE|API_HOST|API_PORT)=' "$ENV_FILE"
 
 if [[ -x "$VENV/bin/python" ]]; then
   log "CUDA smoke test (torch)"
-  "$VENV/bin/python" - <<'PY'
+  if ! "$VENV/bin/python" - <<'PY'
+import sys
+import torch
+print("torch", torch.__version__)
+ok = torch.cuda.is_available()
+print("cuda available", ok)
+if ok:
+    print("gpu", torch.cuda.get_device_name(0))
+else:
+    print("device_count", torch.cuda.device_count(), file=sys.stderr)
+    sys.exit(1)
+PY
+  then
+    echo "WARN: torch.cuda.is_available() is false — reinstalling CUDA PyTorch wheels" >&2
+    # shellcheck disable=SC1091
+    source "$VENV/bin/activate"
+    pip install -U torch torchvision --index-url https://download.pytorch.org/whl/cu124
+    "$VENV/bin/python" - <<'PY'
 import torch
 print("torch", torch.__version__)
 print("cuda available", torch.cuda.is_available())
 if torch.cuda.is_available():
     print("gpu", torch.cuda.get_device_name(0))
 PY
+  fi
 else
   echo "WARN: $VENV not found — run ./scripts/setup-race.sh first" >&2
 fi
 
-if [[ -x "$REPO/scripts/race-services.sh" ]]; then
+if [[ -f "$REPO/scripts/race-services.sh" ]]; then
   log "Restart inference API + worker"
-  "$REPO/scripts/race-services.sh" stop || true
-  "$REPO/scripts/race-services.sh" start
+  bash "$REPO/scripts/race-services.sh" stop || true
+  bash "$REPO/scripts/race-services.sh" start
   sleep 2
-  "$REPO/scripts/race-services.sh" status
+  bash "$REPO/scripts/race-services.sh" status
 fi
 
 log "Done. Expect: \"device\": \"cuda\" in /health when torch sees the GPU"

@@ -205,6 +205,12 @@ def _sse(event: str, data: dict[str, Any]) -> str:
     return f"event: {event}\ndata: {json.dumps(data, default=str)}\n\n"
 
 
+@app.get("/live")
+def live() -> dict[str, str]:
+    """Cheap liveness probe for tunnel detection — do not load models."""
+    return {"status": "ok", "service": "inference"}
+
+
 @app.get("/health", response_model=HealthResponse)
 def health() -> HealthResponse:
     settings = get_settings()
@@ -224,11 +230,11 @@ def health() -> HealthResponse:
     )
 
     paddle_ready = paddle_ocr_available(settings)
-    from app.config import torch_cuda_available
+    from app.config import runtime_torch_device, torch_cuda_available
 
     return HealthResponse(
         run_mode=settings.run_mode.value,
-        device=settings.device.value,
+        device=runtime_torch_device(settings),
         cuda_available=torch_cuda_available(),
         yolo_ready=ready,
         yolo_weights=settings.yolo_weights if ready else None,

@@ -79,6 +79,32 @@ def test_list_detect_models_includes_archvision_walls(monkeypatch: pytest.Monkey
     assert [m["id"] for m in wall_builtins] == ["wall:mitunet", "wall:roboflow"]
 
 
+def test_list_detect_models_skips_studio_without_weights(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.studio import local_store
+    import app.detect_catalog as catalog
+
+    broken_id = "4cb8d44a-3894-42c3-bbdd-5219beb873f4"
+
+    monkeypatch.setattr(
+        catalog,
+        "list_models",
+        lambda: [{"id": broken_id, "name": "Broken", "task": "detect", "category": "object_detection"}],
+    )
+    monkeypatch.setattr(
+        catalog,
+        "model_weights_path",
+        lambda model_id: (_ for _ in ()).throw(local_store.StudioStoreError("missing", 404))
+        if model_id == broken_id
+        else local_store.model_weights_path(model_id),
+    )
+
+    models = list_detect_models(Settings())
+    studio = [m for m in models if str(m.get("id", "")) == f"studio:{broken_id}"]
+    assert len(studio) == 1
+    assert studio[0]["ready"] is False
+    assert studio[0]["runnable"] is False
+
+
 def test_default_detect_model_is_not_legacy_wall_backend() -> None:
     token = default_detect_model(Settings())
     assert not token.startswith("wall:yolo")

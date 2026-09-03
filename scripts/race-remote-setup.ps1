@@ -102,7 +102,7 @@ For the job worker on RACE, replace SUPABASE_SERVICE_ROLE_KEY in services/infere
     Invoke-RaceSshLong -Config $cfg -RemoteCommand $setupCmd
 
     Write-Host "`n==> Enable GPU .env + restart services"
-    Invoke-RaceSsh -Config $cfg -RemoteCommand "chmod +x '$remoteAbs/scripts/race-enable-gpu.sh' && '$remoteAbs/scripts/race-enable-gpu.sh'"
+    Invoke-RaceSsh -Config $cfg -RemoteCommand "sed -i 's/\r$//' '$remoteAbs/scripts/race-enable-gpu.sh' '$remoteAbs/scripts/race-services.sh' && bash '$remoteAbs/scripts/race-enable-gpu.sh'"
 }
 
 if (-not $SkipStart) {
@@ -110,10 +110,10 @@ if (-not $SkipStart) {
     $startCmd = @(
         "set -euo pipefail"
         "cd '$remoteAbs'"
-        "./scripts/race-services.sh stop || true"
-        "./scripts/race-services.sh start"
+        "bash '$remoteAbs/scripts/race-services.sh' stop || true"
+        "bash '$remoteAbs/scripts/race-services.sh' start"
         "sleep 2"
-        "./scripts/race-services.sh status"
+        "bash '$remoteAbs/scripts/race-services.sh' status"
         "curl -sf http://127.0.0.1:8000/health | python3 -m json.tool || true"
     ) -join " && "
     Invoke-RaceSsh -Config $cfg -RemoteCommand $startCmd

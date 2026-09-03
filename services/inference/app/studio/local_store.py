@@ -259,6 +259,41 @@ def delete_page(dataset_id: str, page_id: str) -> dict[str, Any]:
         return _summarize(meta)
 
 
+def is_tile_page(page: dict[str, Any]) -> bool:
+    kind = str(page.get("kind") or "")
+    name = str(page.get("source_name") or "")
+    return kind == "tile" or "_tile" in name.lower()
+
+
+def delete_dataset_tiles(dataset_id: str) -> dict[str, Any]:
+    """Remove every generated tile page and its copied raster/labels."""
+    with _lock:
+        meta_path = dataset_dir(dataset_id) / "meta.json"
+        if not meta_path.is_file():
+            raise StudioStoreError("Dataset not found.", 404)
+        meta = _read_json(meta_path)
+        kept: list[dict[str, Any]] = []
+        removed = 0
+        for page in list(meta.get("pages") or []):
+            if not is_tile_page(page):
+                kept.append(page)
+                continue
+            if not page.get("link"):
+                png = page_png_path(dataset_id, str(page.get("id") or ""))
+                if png.is_file():
+                    png.unlink()
+                local_json = page_json_path(dataset_id, str(page.get("id") or ""))
+                if local_json.is_file():
+                    local_json.unlink()
+            removed += 1
+        meta["pages"] = kept
+        meta["updated_at"] = _now()
+        _write_json(meta_path, meta)
+        summary = _summarize(meta)
+        summary["tiles_removed"] = removed
+        return summary
+
+
 def _path_matches_source(page_source: str, source_name: str | None, target: str, raw: str) -> bool:
     if not page_source and source_name == raw:
         return True
@@ -1065,12 +1100,7 @@ def create_dataset_tiles(
         )
 
     if replace_existing:
-        existing_tiles = [page for page in pages if str(page.get("kind") or "") == "tile"]
-        for page in existing_tiles:
-            try:
-                delete_page(dataset_id, page["id"])
-            except StudioStoreError:
-                continue
+        delete_dataset_tiles(dataset_id)
 
     from app.studio.layout_crop import resolve_drawing_crop_xyxy
 

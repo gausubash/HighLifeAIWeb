@@ -8,7 +8,7 @@ from uuid import uuid4
 import numpy as np
 from PIL import Image
 
-from app.config import Settings, get_settings
+from app.config import Settings, get_settings, runtime_torch_device, yolo_predict_device
 from app.yolo.classes import CLASS_NAMES, display_label, entity_type_for, opening_type_for, room_type_for
 from app.yolo.compass_keypoints import attach_keypoints, extract_ultralytics_keypoints, transform_region_keypoints
 from app.yolo.crop import (
@@ -304,7 +304,9 @@ def get_wall_model(settings: Settings | None = None):
     return _wall_model
 
 
-def _predict_regions(model, rgb: np.ndarray, *, imgsz: int, conf: float, device: str) -> list[DetectedRegion]:
+def _predict_regions(model, rgb: np.ndarray, *, imgsz: int, conf: float, device: str | int) -> list[DetectedRegion]:
+    if device == "cuda":
+        device = yolo_predict_device()
     src_h, src_w = rgb.shape[:2]
     preds = model.predict(
         source=rgb,
@@ -510,7 +512,8 @@ def detect_page_regions(
     src_h, src_w = rgb.shape[:2]
     target_w = original_width or src_w
     target_h = original_height or src_h
-    device = settings.device.value
+    device = runtime_torch_device(settings)
+    yolo_device = yolo_predict_device(settings)
     sx = target_w / src_w if src_w else 1.0
     sy = target_h / src_h if src_h else 1.0
 
@@ -538,7 +541,7 @@ def detect_page_regions(
             crop_rgb,
             imgsz=settings.yolo_imgsz,
             conf=settings.yolo_conf,
-            device=device,
+            device=yolo_device,
         )
         layout_src = _detect_layout_on_full_page(
             rgb,
@@ -556,7 +559,7 @@ def detect_page_regions(
             crop_rgb,
             imgsz=settings.yolo_imgsz,
             conf=settings.yolo_conf,
-            device=device,
+            device=yolo_device,
         )
         layout_src = _detect_layout_on_full_page(
             rgb,
@@ -790,7 +793,7 @@ def detect_page_regions(
                     crop_rgb,
                     imgsz=settings.yolo_wall_imgsz,
                     conf=settings.yolo_wall_conf,
-                    device=device,
+                    device=yolo_device,
                 ),
                 tile_size=int(settings.yolo_wall_imgsz or settings.detect_tile_size or 896),
                 on_progress=_tile_progress(crop),
@@ -811,7 +814,7 @@ def detect_page_regions(
                     crop_rgb,
                     imgsz=settings.yolo_room_imgsz,
                     conf=settings.yolo_room_conf,
-                    device=device,
+                    device=yolo_device,
                 ),
                 tile_size=int(settings.yolo_room_imgsz or settings.detect_tile_size or 640),
                 on_progress=_tile_progress(crop),

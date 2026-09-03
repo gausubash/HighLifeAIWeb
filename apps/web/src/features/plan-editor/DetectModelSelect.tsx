@@ -1,14 +1,17 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   fetchDetectModels,
   type DetectModelOption,
 } from "@/lib/api/floorPlanClient";
+import { prefetchInferenceBackend } from "@/lib/api/inferenceClient";
 import { HoverHint } from "@/components/ui/HoverHint";
 import { categoryLabel } from "@/lib/studio/categories";
 
 const STORAGE_KEY = "highlife-detect-model";
+const LOAD_RETRIES = 4;
+const LOAD_RETRY_MS = 1500;
 
 /** Built-in default per Detect card (persist key → catalog token). */
 export const DEFAULT_DETECT_MODEL_BY_PERSIST_KEY: Record<string, string> = {
@@ -40,6 +43,29 @@ function normalizeStoredDetectToken(stored: string | null, persistKey: string): 
     return "structural:roboflow-seg";
   }
   return stored;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function fetchDetectModelsWithRetry(signal?: AbortSignal): Promise<Awaited<ReturnType<typeof fetchDetectModels>>> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < LOAD_RETRIES; attempt += 1) {
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+    try {
+      if (attempt === 0) {
+        await prefetchInferenceBackend();
+      }
+      return await fetchDetectModels(signal);
+    } catch (err) {
+      lastError = err;
+      if (attempt < LOAD_RETRIES - 1) {
+        await sleep(LOAD_RETRY_MS * (attempt + 1));
+      }
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error("Could not load models");
 }
 
 interface DetectModelSelectProps {
@@ -74,17 +100,26 @@ export function DetectModelSelect({
 }: DetectModelSelectProps) {
   const [models, setModels] = useState<DetectModelOption[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const onChangeRef = useRef(onChange);
+  const valueRef = useRef(value);
+  onChangeRef.current = onChange;
+  valueRef.current = value;
 
   useEffect(() => {
+    const ctrl = new AbortController();
     let cancelled = false;
+
     void (async () => {
       try {
-        const res = await fetchDetectModels();
+        setLoadError(null);
+        const res = await fetchDetectModelsWithRetry(ctrl.signal);
         if (cancelled) return;
+
         const nextModels = res.models
           .filter((m) => m.kind !== "layout")
           .filter((m) => !categoryFilter || (m.category || "") === categoryFilter);
         setModels(nextModels);
+
         const storedRaw =
           persistKey === STORAGE_KEY
             ? readStoredDetectModel()
@@ -93,6 +128,7 @@ export function DetectModelSelect({
               : null;
         const stored = normalizeStoredDetectToken(storedRaw, persistKey ?? "");
         const categoryDefault = DEFAULT_DETECT_MODEL_BY_PERSIST_KEY[persistKey ?? ""] ?? "";
+        const currentValue = valueRef.current;
         const pick =
           stored && nextModels.some((m) => m.id === stored && m.runnable)
             ? stored
@@ -101,23 +137,30 @@ export function DetectModelSelect({
               nextModels.find((m) => m.runnable)?.id ||
               categoryDefault ||
               "";
-        if (!value || !nextModels.some((m) => m.id === value)) {
+
+        if (!currentValue || !nextModels.some((m) => m.id === currentValue)) {
           const selected = nextModels.find((m) => m.id === pick);
-          onChange(pick, selected);
+          onChangeRef.current(pick, selected);
           if (pick && persistKey !== STORAGE_KEY && typeof window !== "undefined") {
             localStorage.setItem(persistKey, pick);
           }
         }
       } catch (e) {
-        if (!cancelled) {
-          setLoadError(e instanceof Error ? e.message : "Could not load models");
-        }
+        if (cancelled || ctrl.signal.aborted) return;
+        const msg = e instanceof Error ? e.message : "Could not load models";
+        setLoadError(
+          msg === "Failed to fetch"
+            ? "Model list still loading — Run works with saved defaults."
+            : msg,
+        );
       }
     })();
+
     return () => {
       cancelled = true;
+      ctrl.abort();
     };
-  }, [categoryFilter, onChange, persistKey, value]);
+  }, [categoryFilter, persistKey]);
 
   const groups = useMemo(() => {
     const byCat = new Map<string, DetectModelOption[]>();
@@ -142,6 +185,7 @@ export function DetectModelSelect({
   const selected = models.find((m) => m.id === value);
   const singleBuiltin =
     categoryFilter && models.length === 1 ? models[0] : null;
+  const showError = loadError && models.length === 0;
 
   const selectEl =
     singleBuiltin && singleBuiltin.runnable ? (
@@ -176,7 +220,7 @@ export function DetectModelSelect({
       }}
     >
       {models.length === 0 ? (
-        <option value="">{loadError ?? "Loading models…"}</option>
+        <option value={value || ""}>{loadError ? "Using saved model" : "Loading models…"}</option>
       ) : (
         groups.map((group) => (
           <optgroup key={group.id} label={group.label}>
@@ -202,7 +246,7 @@ export function DetectModelSelect({
           )}
           {selectEl}
         </div>
-        {loadError ? <p className="mt-0.5 text-xs text-red-600">{loadError}</p> : null}
+        {showError ? <p className="mt-0.5 text-xs text-amber-700">{loadError}</p> : null}
       </div>
     );
   }
@@ -216,8 +260,8 @@ export function DetectModelSelect({
         </span>
         {selectEl}
       </label>
-      {loadError ? (
-        <p className="mt-1 text-xs text-red-600">{loadError}</p>
+      {showError ? (
+        <p className="mt-1 text-xs text-amber-700">{loadError}</p>
       ) : null}
     </div>
   );

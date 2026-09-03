@@ -18,7 +18,7 @@ Write-Host "Tunneling http://127.0.0.1:$LocalPort -> RACE http://127.0.0.1:8000"
 Write-Host "Target: $($inv.Target)  (Ctrl+C to stop)"
 Write-Host ""
 Write-Host "Set in apps/web/.env.local (then restart npm run dev):" -ForegroundColor Cyan
-Write-Host "  NEXT_PUBLIC_INFERENCE_API_URL=http://127.0.0.1:$LocalPort"
+Write-Host "  NEXT_PUBLIC_INFERENCE_API_URL=auto"
 Write-Host ""
 Write-Host "Check GPU: npm run race:check" -ForegroundColor Cyan
 Write-Host ""

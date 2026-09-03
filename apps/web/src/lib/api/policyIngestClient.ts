@@ -1,4 +1,4 @@
-import { getInferenceApiBaseUrl } from "./inferenceClient";
+import { inferenceFetch } from "./inferenceClient";
 import type { PolicyPack } from "@highlife/shared-types";
 import { parsePolicyPack } from "@/lib/policy/parsePolicyPack";
 
@@ -13,7 +13,7 @@ export async function refinePolicyFromText(
   pages?: PolicyVisionPage[],
 ): Promise<{ pack: PolicyPack; provider: string } | null> {
   try {
-    const res = await fetch(`${getInferenceApiBaseUrl()}/v1/policy/from-text`, {
+    const res = await inferenceFetch("/v1/policy/from-text", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text, fileName, pages }),
@@ -28,7 +28,7 @@ export async function refinePolicyFromText(
 }
 
 export async function ingestPolicyYaml(text: string, fileName?: string): Promise<PolicyPack> {
-  const res = await fetch(`${getInferenceApiBaseUrl()}/v1/policy/from-text`, {
+  const res = await inferenceFetch("/v1/policy/from-text", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ text, fileName, format: "yaml" }),

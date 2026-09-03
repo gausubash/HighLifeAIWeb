@@ -1,5 +1,5 @@
 import { PDF_RENDER_DPI } from "@/lib/pdf/renderPdfFirstPage";
-import { getInferenceApiBaseUrl } from "./inferenceClient";
+import { inferenceFetch, resolveInferenceApiBaseUrl } from "./inferenceClient";
 import { snakeToCamelDeep } from "./snakeCamel";
 
 export type OcrLine = {
@@ -225,7 +225,7 @@ export async function ocrPdfDocument(
     form.append("page_crops", JSON.stringify(payload));
   }
   appendOcrOptionsToForm(form, options.ocrOptions);
-  const res = await fetch(`${getInferenceApiBaseUrl()}/v1/ocr/pdf`, {
+  const res = await inferenceFetch("/v1/ocr/pdf", {
     method: "POST",
     body: form,
     signal: options.signal,
@@ -258,7 +258,7 @@ export async function ocrPageImage(
   form.append("file", blob, filename);
   form.append("profile", options.profile ?? "default");
   appendOcrOptionsToForm(form, options.ocrOptions);
-  const res = await fetch(`${getInferenceApiBaseUrl()}/v1/ocr/page`, {
+  const res = await inferenceFetch("/v1/ocr/page", {
     method: "POST",
     body: form,
     signal: options.signal,
@@ -345,7 +345,8 @@ export async function ocrPageImageStream(
   form.append("file", blob, filename);
   form.append("profile", options.profile ?? "default");
   appendOcrOptionsToForm(form, options.ocrOptions);
-  const res = await fetch(`${getInferenceApiBaseUrl()}/v1/ocr/page/stream`, {
+  const base = await resolveInferenceApiBaseUrl();
+  const res = await fetch(`${base}/v1/ocr/page/stream`, {
     method: "POST",
     body: form,
     signal: options.signal,

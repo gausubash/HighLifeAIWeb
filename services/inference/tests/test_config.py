@@ -2,7 +2,7 @@
 
 import pytest
 
-from app.config import Device, RunMode, Settings, get_settings, resolve_device, torch_cuda_available
+from app.config import Device, RunMode, Settings, get_settings, resolve_device, runtime_torch_device, torch_cuda_available, yolo_predict_device
 
 
 def test_default_settings_mock_mode(monkeypatch: pytest.MonkeyPatch):
@@ -59,6 +59,28 @@ def test_device_auto_picks_cpu(monkeypatch: pytest.MonkeyPatch):
 def test_resolve_device_helper():
     assert resolve_device(Device.CPU) == Device.CPU
     assert resolve_device(Device.AUTO) in (Device.CPU, Device.CUDA)
+
+
+def test_runtime_torch_device_respects_cpu(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("DEVICE", "cpu")
+    monkeypatch.setattr("app.config.torch_cuda_available", lambda: True)
+    settings = Settings(_env_file=None)
+    assert runtime_torch_device(settings) == "cpu"
+
+
+def test_runtime_torch_device_falls_back_when_cuda_unavailable(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("DEVICE", "cuda")
+    monkeypatch.setattr("app.config.torch_cuda_available", lambda: False)
+    settings = Settings(_env_file=None)
+    assert runtime_torch_device(settings) == "cpu"
+    assert yolo_predict_device(settings) == "cpu"
+
+
+def test_yolo_predict_device_uses_gpu_index(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("DEVICE", "cuda")
+    monkeypatch.setattr("app.config.torch_cuda_available", lambda: True)
+    settings = Settings(_env_file=None)
+    assert yolo_predict_device(settings) == 0
 
 
 def test_get_settings_cached():

@@ -17,6 +17,7 @@ from app.studio.local_store import (
     convert_dataset_to_yolo,
     create_dataset,
     create_dataset_tiles,
+    delete_dataset_tiles,
     export_annotation_crops,
     create_job,
     delete_dataset,
@@ -417,6 +418,15 @@ def studio_export_zip(dataset_id: str):
         media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@router.delete("/datasets/{dataset_id}/tiles")
+def studio_delete_tiles(dataset_id: str) -> dict:
+    """Remove every generated training tile from the dataset (keeps source pages)."""
+    try:
+        return delete_dataset_tiles(dataset_id)
+    except StudioStoreError as exc:
+        return _store_error(exc)
 
 
 @router.post("/datasets/{dataset_id}/create-tiles")

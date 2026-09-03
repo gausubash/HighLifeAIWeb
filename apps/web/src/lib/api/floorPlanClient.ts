@@ -4,7 +4,7 @@
  */
 
 import type { AnalysisRun, FloorPlanSceneGraph, FpProject, PlanDocument } from "@highlife/shared-types";
-import { getInferenceApiBaseUrl } from "@/lib/api/inferenceClient";
+import { inferenceFetch, resolveInferenceApiBaseUrl } from "@/lib/api/inferenceClient";
 
 /** GreenMap yolo11x-blueprint-layout-detector — title block, legend, drawing area. */
 export const LAYOUT_DETECT_MODEL = "layout:greenmap";
@@ -146,11 +146,39 @@ export type DetectModelsResponse = {
   wall_backend: string;
 };
 
+let detectModelsCache: DetectModelsResponse | null = null;
+let detectModelsPending: Promise<DetectModelsResponse> | null = null;
+
+export function clearDetectModelsCache(): void {
+  detectModelsCache = null;
+  detectModelsPending = null;
+}
+
+async function loadDetectModels(signal?: AbortSignal): Promise<DetectModelsResponse> {
+  const res = await inferenceFetch("/v1/detect/models", { signal });
+  return parseJson<DetectModelsResponse>(res);
+}
+
 export async function fetchDetectModels(
   signal?: AbortSignal,
 ): Promise<DetectModelsResponse> {
-  const res = await fetch(`${getInferenceApiBaseUrl()}/v1/detect/models`, { signal });
-  return parseJson<DetectModelsResponse>(res);
+  if (detectModelsCache) return detectModelsCache;
+  if (detectModelsPending) return detectModelsPending;
+
+  detectModelsPending = loadDetectModels(signal)
+    .then((body) => {
+      detectModelsCache = body;
+      return body;
+    })
+    .catch((err) => {
+      clearDetectModelsCache();
+      throw err;
+    })
+    .finally(() => {
+      detectModelsPending = null;
+    });
+
+  return detectModelsPending;
 }
 
 export async function detectPageRegions(opts: {
@@ -171,7 +199,7 @@ export async function detectPageRegions(opts: {
   } else if (opts.modelId) {
     form.append("modelId", opts.modelId);
   }
-  const res = await fetch(`${getInferenceApiBaseUrl()}/v1/detect`, {
+  const res = await inferenceFetch("/v1/detect", {
     method: "POST",
     headers: opts.headers,
     body: form,
@@ -273,7 +301,8 @@ export async function detectPageRegionsStream(
   if (opts.wallThreshold != null) form.append("wallThreshold", String(opts.wallThreshold));
   if (opts.tileOverlap != null) form.append("tileOverlap", String(opts.tileOverlap));
 
-  const res = await fetch(`${getInferenceApiBaseUrl()}/v1/detect/stream`, {
+  const base = await resolveInferenceApiBaseUrl();
+  const res = await fetch(`${base}/v1/detect/stream`, {
     method: "POST",
     body: form,
     signal: opts.signal,
@@ -389,7 +418,7 @@ export async function extractGeometryFromImage(opts: {
   if (opts.pixelsPerMeter != null && opts.pixelsPerMeter > 0) {
     form.append("pixelsPerMeter", String(opts.pixelsPerMeter));
   }
-  const res = await fetch(`${getInferenceApiBaseUrl()}/v1/geometry/extract`, {
+  const res = await inferenceFetch("/v1/geometry/extract", {
     method: "POST",
     body: form,
   });

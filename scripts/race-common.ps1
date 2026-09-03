@@ -178,7 +178,8 @@ function Invoke-RaceScp {
         [Parameter(Mandatory)][string]$RemotePath
     )
     $inv = Get-SshInvocation $Config
-    & scp @($inv.ExtraArgs) $LocalPath "${($inv.Target)}:${RemotePath}"
+    $remoteDest = "{0}:{1}" -f $inv.Target, $RemotePath
+    & scp @($inv.ExtraArgs) $LocalPath $remoteDest
     if ($LASTEXITCODE -ne 0) {
         throw "SCP failed: $LocalPath -> $RemotePath"
     }
