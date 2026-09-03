@@ -14,6 +14,7 @@ type GeometryExtractState = {
   graph: RoomGraph | null;
   overlayEntities: OverlayEntity[];
   showOverlays: boolean;
+  showGraphOnPlan: boolean;
   activeUnitId: string | null;
   selectedId: string | null;
   extracting: boolean;
@@ -21,6 +22,7 @@ type GeometryExtractState = {
   warning: string | null;
   lastMethod: "overlays" | "image" | null;
   setShowOverlays: (value: boolean) => void;
+  setShowGraphOnPlan: (value: boolean) => void;
   setActiveUnitId: (id: string | null) => void;
   setSelectedId: (id: string | null) => void;
   removeByLabel: (label: string) => void;
@@ -42,6 +44,7 @@ export const useGeometryExtractStore = create<GeometryExtractState>((set) => ({
   graph: null,
   overlayEntities: [],
   showOverlays: false,
+  showGraphOnPlan: true,
   activeUnitId: null,
   selectedId: null,
   extracting: false,
@@ -49,6 +52,7 @@ export const useGeometryExtractStore = create<GeometryExtractState>((set) => ({
   warning: null,
   lastMethod: null,
   setShowOverlays: (showOverlays) => set({ showOverlays }),
+  setShowGraphOnPlan: (showGraphOnPlan) => set({ showGraphOnPlan }),
   setActiveUnitId: (activeUnitId) => set({ activeUnitId }),
   setSelectedId: (selectedId) => set({ selectedId }),
   removeByLabel: (label) =>

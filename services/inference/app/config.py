@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 from enum import Enum
 from functools import lru_cache
+from typing import Self
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+logger = logging.getLogger(__name__)
 
 
 class RunMode(str, Enum):
@@ -17,6 +21,28 @@ class RunMode(str, Enum):
 class Device(str, Enum):
     CPU = "cpu"
     CUDA = "cuda"
+    AUTO = "auto"
+
+
+def torch_cuda_available() -> bool:
+    """Best-effort CUDA probe (False when torch missing or no GPU)."""
+    try:
+        import torch
+
+        return bool(torch.cuda.is_available())
+    except Exception:
+        return False
+
+
+def resolve_device(device: Device) -> Device:
+    """Resolve DEVICE=auto/cuda to cpu when no GPU is visible to torch."""
+    if device == Device.CPU:
+        return Device.CPU
+    if torch_cuda_available():
+        return Device.CUDA
+    if device == Device.CUDA:
+        logger.warning("DEVICE=cuda but torch.cuda.is_available() is false — using cpu")
+    return Device.CPU
 
 
 class Settings(BaseSettings):
@@ -27,7 +53,7 @@ class Settings(BaseSettings):
     )
 
     run_mode: RunMode = Field(default=RunMode.MOCK, alias="RUN_MODE")
-    device: Device = Field(default=Device.CPU, alias="DEVICE")
+    device: Device = Field(default=Device.AUTO, alias="DEVICE")
 
     api_host: str = Field(default="127.0.0.1", alias="API_HOST")
     api_port: int = Field(default=8000, alias="API_PORT")
@@ -175,6 +201,13 @@ class Settings(BaseSettings):
     )
     # Runtime opening specialist: architect | roboflow-seg (set by detect token)
     opening_backend: str = ""
+
+    @model_validator(mode="after")
+    def _resolve_device(self) -> Self:
+        resolved = resolve_device(self.device)
+        if resolved != self.device:
+            object.__setattr__(self, "device", resolved)
+        return self
 
 
 @lru_cache

@@ -10,6 +10,7 @@ import threading
 import time
 import uuid
 
+from app.config import Device, resolve_device
 from app.jobs.process import process_job
 from app.jobs.queue import LocalJobQueue, SupabaseJobQueue, resolve_queue
 
@@ -119,9 +120,15 @@ def _maybe_write_supabase_result(queue: SupabaseJobQueue, job, result: dict) -> 
         logger.exception("Could not write analysis_results for %s", job.analysis_id)
 
 
+def _resolve_worker_device(arg: str) -> str:
+    if arg == "auto":
+        return resolve_device(Device.AUTO).value
+    return arg
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Poll and process analysis jobs")
-    parser.add_argument("--device", choices=["cpu", "cuda"], default="cpu")
+    parser.add_argument("--device", choices=["cpu", "cuda", "auto"], default="auto")
     parser.add_argument("--poll-interval", type=float, default=5.0)
     parser.add_argument("--batch-size", type=int, default=1, help="Jobs claimed per poll (Phase 9)")
     parser.add_argument("--lease-seconds", type=int, default=120)
@@ -129,11 +136,12 @@ def main() -> int:
     parser.add_argument("--once", action="store_true", help="Process at most one batch then exit")
     parser.add_argument("--enqueue-demo", action="store_true", help="Enqueue a mock local job then exit")
     args = parser.parse_args()
+    device = _resolve_worker_device(args.device)
 
     queue = resolve_queue()
     worker_id = _worker_id()
     backend = "supabase" if isinstance(queue, SupabaseJobQueue) else "local"
-    logger.info("Worker %s starting (backend=%s device=%s)", worker_id, backend, args.device)
+    logger.info("Worker %s starting (backend=%s device=%s)", worker_id, backend, device)
 
     if args.enqueue_demo:
         if not isinstance(queue, LocalJobQueue):
@@ -150,7 +158,7 @@ def main() -> int:
             batch_size=args.batch_size,
             lease_seconds=args.lease_seconds,
             heartbeat_interval=args.heartbeat_interval,
-            device=args.device,
+            device=device,
         )
         if args.once:
             return 0 if n >= 0 else 1

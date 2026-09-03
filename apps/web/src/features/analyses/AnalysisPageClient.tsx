@@ -16,6 +16,7 @@ import { OverlayHotkeys } from "@/features/plan-editor/OverlayHotkeys";
 import { HierarchyPanel } from "@/features/analyses/HierarchyPanel";
 import { ReviewPanel } from "@/features/analyses/ReviewPanel";
 import { GeometryPanel } from "@/features/analyses/GeometryPanel";
+import { GraphPanel } from "@/features/analyses/GraphPanel";
 import { useGeometryExtractStore } from "@/features/analyses/useGeometryExtractStore";
 import { useUnitGraphView } from "@/features/analyses/useUnitGraphView";
 import { PolicyPanel } from "@/features/policy/PolicyPanel";
@@ -113,6 +114,7 @@ type InspectorTabId =
   | "ocr"
   | "detect"
   | "geometry"
+  | "graph"
   | "hierarchy"
   | "policy"
   | "review";
@@ -123,6 +125,7 @@ const INSPECTOR_TABS = new Set<InspectorTabId>([
   "ocr",
   "detect",
   "geometry",
+  "graph",
   "hierarchy",
   "policy",
   "review",
@@ -217,10 +220,6 @@ export function AnalysisPageClient({ projectId, analysisId }: AnalysisPageClient
   useEffect(() => {
     if (typeof window === "undefined") return;
     const tab = new URLSearchParams(window.location.search).get("tab");
-    if (tab === "graph") {
-      setInspectorTab("geometry");
-      return;
-    }
     if (tab && INSPECTOR_TABS.has(tab as InspectorTabId)) {
       setInspectorTab(tab as InspectorTabId);
     }
@@ -278,6 +277,7 @@ export function AnalysisPageClient({ projectId, analysisId }: AnalysisPageClient
   const geometryGraph = useGeometryExtractStore((s) => s.graph);
   const geometryRoomCount = geometryRooms.length;
   const geometrySelectedId = useGeometryExtractStore((s) => s.selectedId);
+  const showGraphOnPlan = useGeometryExtractStore((s) => s.showGraphOnPlan);
   const setGeometrySelectedId = useGeometryExtractStore((s) => s.setSelectedId);
   const pageCount = result?.pages.length ?? 0;
   const page = result?.pages[pageIndex];
@@ -316,7 +316,7 @@ export function AnalysisPageClient({ projectId, analysisId }: AnalysisPageClient
     return ensureOcrLinesInPageSpace(pageDrawingOcr, crop, page.widthPx, page.heightPx)?.lines ?? null;
   }, [analysisId, page, pageDrawingOcr]);
   const ocrRoomMarkers = useMemo(() => {
-    if (inspectorTab !== "geometry") return [];
+    if (inspectorTab !== "graph" || !showGraphOnPlan) return [];
     if (!pageSpaceDrawingOcrLines?.length) return [];
     const entities = overlayPages[pageKey(analysisId, pageNumber)]?.entities ?? [];
     const units = unitBoundariesFromEntities(entities);
@@ -327,7 +327,7 @@ export function AnalysisPageClient({ projectId, analysisId }: AnalysisPageClient
       label: r.label,
       unitLabel: r.unitLabel,
     }));
-  }, [inspectorTab, pageSpaceDrawingOcrLines, overlayPages, analysisId, pageNumber]);
+  }, [inspectorTab, showGraphOnPlan, pageSpaceDrawingOcrLines, overlayPages, analysisId, pageNumber]);
 
   const unitGraphView = useUnitGraphView({
     analysisId,
@@ -339,7 +339,7 @@ export function AnalysisPageClient({ projectId, analysisId }: AnalysisPageClient
   });
 
   const unitGraphOverlay = useMemo(() => {
-    if (inspectorTab !== "geometry") return null;
+    if (inspectorTab !== "graph" || !showGraphOnPlan) return null;
     if (!unitGraphView.unitGraph || !unitGraphView.activeUnit) return null;
     return {
       unitGraph: unitGraphView.unitGraph,
@@ -350,6 +350,7 @@ export function AnalysisPageClient({ projectId, analysisId }: AnalysisPageClient
     };
   }, [
     inspectorTab,
+    showGraphOnPlan,
     unitGraphView.unitGraph,
     unitGraphView.activeUnit,
     unitGraphView.activeTopology,
@@ -415,7 +416,7 @@ export function AnalysisPageClient({ projectId, analysisId }: AnalysisPageClient
   ]);
 
   useEffect(() => {
-    if ((inspectorTab === "layout" || inspectorTab === "detect" || inspectorTab === "geometry" || inspectorTab === "review" || inspectorTab === "policy") && toolMode === "none") {
+    if ((inspectorTab === "layout" || inspectorTab === "detect" || inspectorTab === "geometry" || inspectorTab === "graph" || inspectorTab === "review" || inspectorTab === "policy") && toolMode === "none") {
       setOverlayTool("select");
     }
   }, [inspectorTab, toolMode, setOverlayTool]);
@@ -1967,7 +1968,16 @@ export function AnalysisPageClient({ projectId, analysisId }: AnalysisPageClient
     {
       id: "geometry",
       label: "Geometry",
-      title: "Rooms, adjacency graph, and topology",
+      title: "Extract rooms from overlays or the page image",
+      badge:
+        geometryPageKey === pageKey(analysisId, pageNumber) && geometryRoomCount > 0
+          ? geometryRoomCount
+          : null,
+    },
+    {
+      id: "graph",
+      label: "Graph",
+      title: "Adjacency graph and apartment topology",
       badge:
         geometryPageKey === pageKey(analysisId, pageNumber) && geometryRoomCount > 0
           ? geometryRoomCount
@@ -2005,8 +2015,11 @@ export function AnalysisPageClient({ projectId, analysisId }: AnalysisPageClient
     if (tab === "geometry") {
       useGeometryExtractStore.getState().setShowOverlays(true);
     }
+    if (tab === "graph") {
+      useGeometryExtractStore.getState().setShowGraphOnPlan(true);
+    }
     if (toolMode !== "none") return;
-    if (tab === "layout" || tab === "review" || tab === "policy" || tab === "geometry") {
+    if (tab === "layout" || tab === "review" || tab === "policy" || tab === "geometry" || tab === "graph") {
       setOverlayTool("select");
       setLayoutDrawType(null);
     } else {
@@ -2026,11 +2039,13 @@ export function AnalysisPageClient({ projectId, analysisId }: AnalysisPageClient
             ? "Detect"
             : inspectorTab === "geometry"
               ? "Geometry"
-              : inspectorTab === "policy"
-                ? "Policy"
-                : inspectorTab === "review"
-                  ? "Review"
-                  : "Hierarchy";
+              : inspectorTab === "graph"
+                ? "Graph"
+                : inspectorTab === "policy"
+                  ? "Policy"
+                  : inspectorTab === "review"
+                    ? "Review"
+                    : "Hierarchy";
 
   return (
     <WorkspaceShell
@@ -2309,6 +2324,14 @@ export function AnalysisPageClient({ projectId, analysisId }: AnalysisPageClient
                 pixelsPerMeter={scaleInfo?.pixelsPerMeter ?? null}
                 pageImageUrl={pageImageUrl}
                 drawingOcrLines={pageSpaceDrawingOcrLines}
+              />
+            ) : inspectorTab === "graph" ? (
+              <GraphPanel
+                analysisId={analysisId}
+                pageNumber={pageNumber}
+                entities={overlayPages[pageKey(analysisId, pageNumber)]?.entities ?? []}
+                pixelsPerMeter={scaleInfo?.pixelsPerMeter ?? null}
+                drawingOcrLines={pageSpaceDrawingOcrLines}
                 ocrLinesForTypes={ocrLinesFromPage(page)}
               />
             ) : null}
@@ -2320,7 +2343,7 @@ export function AnalysisPageClient({ projectId, analysisId }: AnalysisPageClient
         <OverlayHotkeys
           enabled={toolMode === "none"}
           layoutEditMode={inspectorTab === "layout"}
-          keepSelectOnEscape={inspectorTab === "detect" || inspectorTab === "geometry"}
+          keepSelectOnEscape={inspectorTab === "detect" || inspectorTab === "geometry" || inspectorTab === "graph"}
           compassKeypoints={inspectorTab === "detect"}
         />
         {rotateError ? (

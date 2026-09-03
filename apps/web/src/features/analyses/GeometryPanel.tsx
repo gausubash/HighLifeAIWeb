@@ -29,7 +29,6 @@ import { buildUnitGraph } from "@/lib/geometry/buildUnitGraph";
 import { classifyWallEntities } from "@/lib/geometry/classifyWallEntities";
 import { extractGeometryFromImage } from "@/lib/api/floorPlanClient";
 import type { DrawingOcrLine } from "@/lib/hierarchy/inferUnitBoundaries";
-import type { ApartmentTypeLine } from "@/lib/hierarchy/apartmentType";
 import { useMainDoorDetectionStore, mainDoorWidthOptsFromStore } from "@/features/plan-editor/useMainDoorDetectionStore";
 import {
   autoMainDoorSplitSpan,
@@ -39,7 +38,6 @@ import {
 import { doorLikesFromEntities } from "@/lib/hierarchy/doorLikesFromEntities";
 import { cn } from "@/lib/utils";
 import { useGeometryExtractStore } from "./useGeometryExtractStore";
-import { UnitGraphSection } from "./UnitGraphSection";
 
 type Props = {
   analysisId: string;
@@ -50,7 +48,6 @@ type Props = {
   pixelsPerMeter: number | null;
   pageImageUrl: string | null;
   drawingOcrLines?: DrawingOcrLine[] | null;
-  ocrLinesForTypes?: ApartmentTypeLine[] | null;
 };
 
 function formatArea(m2: number | null, px2: number, scaled: boolean): string {
@@ -182,7 +179,6 @@ export function GeometryPanel({
   pixelsPerMeter,
   pageImageUrl,
   drawingOcrLines,
-  ocrLinesForTypes,
 }: Props) {
   const externalMinMm = useWallClassificationStore((s) => s.externalMinMm);
   const externalMinPx = useWallClassificationStore((s) => s.externalMinPx);
@@ -452,7 +448,7 @@ export function GeometryPanel({
         title="Geometry"
         as="p"
         className="text-xs font-semibold uppercase tracking-wider text-slate-400"
-        hint="Extract wall-bounded rooms, explore adjacency and apartment topology (living / dining / kitchen hub). Click a room for neighbours, doors, and ventilation."
+        hint="Extract wall-bounded rooms from Detect overlays or the page image. Click a room for neighbours, doors, and ventilation."
       />
 
       <div className="flex items-center gap-1 text-xs tabular-nums text-slate-500">
@@ -501,7 +497,7 @@ export function GeometryPanel({
             checked={showOverlays}
             onChange={(e) => setShowOverlays(e.target.checked)}
           />
-          Overlay / graph
+          Show rooms on plan
         </label>
       </div>
 
@@ -738,15 +734,6 @@ export function GeometryPanel({
             ) : null}
           </div>
           ))}
-          <UnitGraphSection
-            analysisId={analysisId}
-            pageNumber={pageNumber}
-            entities={entities}
-            pixelsPerMeter={pixelsPerMeter}
-            drawingOcrLines={drawingOcrLines}
-            ocrLinesForTypes={ocrLinesForTypes}
-            hasRooms={pageRooms.length > 0}
-          />
         </div>
       )}
     </div>

@@ -59,7 +59,7 @@ start_worker() {
   fi
   activate
   nohup "$VENV/bin/python" -m app.worker \
-    --device cuda \
+    --device auto \
     --poll-interval 10 \
     --batch-size 2 \
     --lease-seconds 180 \

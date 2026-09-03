@@ -64,9 +64,17 @@ function TabIcon({ id, ...props }: SVGProps<SVGSVGElement> & { id: string }) {
           <path d="M12 3 21 8.5v7L12 21 3 15.5v-7L12 3Z" />
           <path d="M12 21v-7.5" />
           <path d="m3 8.5 9 5 9-5" />
-          <circle cx="7" cy="8" r="1.5" fill="currentColor" stroke="none" />
-          <circle cx="17" cy="8" r="1.5" fill="currentColor" stroke="none" />
-          <circle cx="12" cy="17" r="1.5" fill="currentColor" stroke="none" />
+        </svg>
+      );
+    case "graph":
+      return (
+        <svg {...common}>
+          <circle cx="6.5" cy="7" r="2.2" />
+          <circle cx="17.5" cy="8" r="2.2" />
+          <circle cx="12" cy="17.5" r="2.2" />
+          <path d="M8.4 8.1 15.4 8.9" />
+          <path d="M7.8 8.8 10.8 15.6" />
+          <path d="M16.4 9.9 13.4 15.6" />
         </svg>
       );
     case "hierarchy":

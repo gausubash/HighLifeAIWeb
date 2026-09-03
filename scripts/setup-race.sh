@@ -224,7 +224,7 @@ path = pathlib.Path(sys.argv[1])
 text = path.read_text(encoding="utf-8")
 replacements = {
     r"^RUN_MODE=.*": "RUN_MODE=real",
-    r"^DEVICE=.*": "DEVICE=cuda",
+    r"^DEVICE=.*": "DEVICE=auto",
     r"^API_HOST=.*": "API_HOST=127.0.0.1",
     r"^API_PORT=.*": "API_PORT=8000",
 }
@@ -234,7 +234,7 @@ for pattern, value in replacements.items():
     else:
         text = text.rstrip() + f"\n{value}\n"
 path.write_text(text, encoding="utf-8")
-print(f"Updated {path} for RACE (RUN_MODE=real, DEVICE=cuda)")
+print(f"Updated {path} for RACE (RUN_MODE=real, DEVICE=auto)")
 PY
 
   log "CUDA smoke test"
@@ -331,7 +331,10 @@ main() {
     setup_gpu_venv "$root"
   fi
 
-  chmod +x "$root/scripts/race-services.sh" "$root/scripts/race-train.sh" 2>/dev/null || true
+  chmod +x "$root/scripts/race-services.sh" "$root/scripts/race-train.sh" "$root/scripts/race-enable-gpu.sh" 2>/dev/null || true
+  if [[ -f "$root/scripts/race-enable-gpu.sh" ]]; then
+    REPO="$root" "$root/scripts/race-enable-gpu.sh" || true
+  fi
   print_next_steps "$root"
 }
 

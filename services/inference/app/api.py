@@ -62,6 +62,7 @@ class HealthResponse(BaseModel):
     status: str = "ok"
     run_mode: str
     device: str
+    cuda_available: bool = False
     service: str = "inference"
     yolo_ready: bool = False
     yolo_weights: str | None = None
@@ -223,9 +224,12 @@ def health() -> HealthResponse:
     )
 
     paddle_ready = paddle_ocr_available(settings)
+    from app.config import torch_cuda_available
+
     return HealthResponse(
         run_mode=settings.run_mode.value,
         device=settings.device.value,
+        cuda_available=torch_cuda_available(),
         yolo_ready=ready,
         yolo_weights=settings.yolo_weights if ready else None,
         room_ready=rooms,

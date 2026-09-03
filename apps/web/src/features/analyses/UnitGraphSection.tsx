@@ -143,8 +143,7 @@ export function UnitGraphSection({
     ) ?? [];
 
   return (
-    <div className="space-y-2 border-t border-slate-200 pt-3">
-      <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">Unit graph</p>
+    <div className="space-y-2">
       <p className="text-xs tabular-nums text-slate-500">
         {unitGraph.units.length} unit{unitGraph.units.length === 1 ? "" : "s"} ·{" "}
         {unitGraph.nodes.length} room{unitGraph.nodes.length === 1 ? "" : "s"} ·{" "}

@@ -12,6 +12,68 @@ RMIT **RACE** is a private GPU workstation. This repo keeps heavy ML on RACE and
 
 System RAM: **32 GB** minimum, **64 GB** for large tile datasets.
 
+## Setup from your laptop (automated)
+
+Repo-root `.env` should include:
+
+```bash
+RACE_HOST=race
+RACE_HOST_NAME=ec2-xx-xx-xx-xx.ap-southeast-2.compute.amazonaws.com
+RACE_USER=ec2-user
+RACE_KEY=C:/Users/you/.ssh/your-key.pem
+RACE_REPO=~/HighLifeAIWeb
+NEXT_PUBLIC_SUPABASE_URL=https://<project>.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=<cloud-service-role>   # optional; needed for job worker
+ROBOFLOW_API_KEY=...
+```
+
+Add a `Host race` block to `~/.ssh/config` (Windows: `C:\Users\<you>\.ssh\config`) pointing at the same key — the setup script uses the **alias**, not `-i`, because that is more reliable on Windows.
+
+Recommended keepalive settings (add under `Host race`):
+
+```ssh-config
+Host race
+  HostName ec2-xx-xx-xx-xx.ap-southeast-2.compute.amazonaws.com
+  User ec2-user
+  IdentityFile ~/.ssh/HighLifeAI.pem
+  IdentitiesOnly yes
+  ServerAliveInterval 30
+  ServerAliveCountMax 120
+  ConnectTimeout 120
+  TCPKeepAlive yes
+```
+
+**Do not run `npm run race:setup` inside the RACE web browser SSH** — that console often closes idle sessions after ~60 seconds. Run setup from **your laptop PowerShell** or **VS Code Remote SSH** instead. Long GPU install runs in `tmux` on the server so it survives disconnects.
+
+One command from the repo on your laptop:
+
+```powershell
+npm run race:setup
+```
+
+This syncs the repo to RACE, installs GPU Python deps, writes `services/inference/.env`, and starts the inference API + worker.
+
+Daily tunnel for the browser UI:
+
+```powershell
+npm run race:tunnel
+npm run dev
+```
+
+Re-run setup after code changes:
+
+```powershell
+npm run race:setup
+```
+
+Skip sync if only restarting services:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/race-remote-setup.ps1 -SkipSync -SkipSetup
+```
+
+---
+
 ## One-time bootstrap (fresh Ubuntu VM)
 
 From any shell on RACE:
